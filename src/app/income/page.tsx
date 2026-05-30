@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
 import type { Income } from '@/lib/types'
 import { Bone } from '@/components/Skeleton'
+import { MonthPicker, type MonthValue } from '@/components/MonthPicker'
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -18,14 +19,11 @@ function formatDate(s: string) {
   return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-function currentMonthRange() {
-  const now = new Date()
-  const y = now.getFullYear()
-  const m = now.getMonth() + 1
-  const first = `${y}-${String(m).padStart(2, '0')}-01`
-  const lastDay = new Date(y, m, 0).getDate()
-  const last = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
-  const label = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+function monthRange(year: number, month: number) {
+  const first = `${year}-${String(month).padStart(2, '0')}-01`
+  const lastDay = new Date(year, month, 0).getDate()
+  const last = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
+  const label = new Date(year, month - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
   return { first, last, label }
 }
 
@@ -370,17 +368,21 @@ export default function IncomePage() {
   const [editingIncome, setEditingIncome] = useState<Income | null>(null)
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [selectedMonth, setSelectedMonth] = useState<MonthValue>(() => {
+    const now = new Date()
+    return { year: now.getFullYear(), month: now.getMonth() + 1 }
+  })
 
   useEffect(() => {
-    setMonthLabel(currentMonthRange().label)
-    fetchData()
-  }, [])
+    fetchData(selectedMonth.year, selectedMonth.month)
+  }, [selectedMonth])
 
-  async function fetchData() {
+  async function fetchData(year: number, month: number) {
     setLoading(true)
     try {
-      const { first, last } = currentMonthRange()
-      const [{ data: all }, { data: month }] = await Promise.all([
+      const { first, last, label } = monthRange(year, month)
+      setMonthLabel(label)
+      const [{ data: all }, { data: monthData }] = await Promise.all([
         supabase.from('income').select('*').order('paycheck_date', { ascending: false }),
         supabase
           .from('income')
@@ -389,9 +391,9 @@ export default function IncomePage() {
           .lte('paycheck_date', last),
       ])
       setHistory(all ?? [])
-      const gross = month?.reduce((s, r) => s + Number(r.gross_amount), 0) ?? 0
-      const taxes = month?.reduce((s, r) => s + Number(r.taxes_withheld ?? 0), 0) ?? 0
-      const net = month?.reduce((s, r) => s + Number(r.net_amount ?? 0), 0) ?? 0
+      const gross = monthData?.reduce((s, r) => s + Number(r.gross_amount), 0) ?? 0
+      const taxes = monthData?.reduce((s, r) => s + Number(r.taxes_withheld ?? 0), 0) ?? 0
+      const net = monthData?.reduce((s, r) => s + Number(r.net_amount ?? 0), 0) ?? 0
       setSummary({ gross, taxes, net, taxRate: gross > 0 ? (taxes / gross) * 100 : 0 })
     } catch {
       toast.error('Failed to load income data')
@@ -424,7 +426,7 @@ export default function IncomePage() {
     toast.success('Income logged!')
     setForm(defaultForm())
     setNetEdited(false)
-    fetchData()
+    fetchData(selectedMonth.year, selectedMonth.month)
   }
 
   async function handleDelete(id: string) {
@@ -432,18 +434,21 @@ export default function IncomePage() {
     if (error) { toast.error('Failed to delete'); return }
     toast.success('Income deleted')
     setDeleteId(null)
-    fetchData()
+    fetchData(selectedMonth.year, selectedMonth.month)
   }
 
   function handleEditSave(updated: Income) {
     setHistory((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))
     setEditingIncome(null)
-    fetchData()
+    fetchData(selectedMonth.year, selectedMonth.month)
   }
 
   return (
     <div>
-      <h1 className="text-xl font-bold text-slate-800 mb-5">Income</h1>
+      <div className="flex items-center justify-between mb-5">
+        <h1 className="text-xl font-bold text-slate-800">Income</h1>
+        <MonthPicker value={selectedMonth} onChange={setSelectedMonth} />
+      </div>
 
       {/* Add income form */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-8">

@@ -7,27 +7,24 @@ import toast from 'react-hot-toast'
 import type { BudgetTarget } from '@/lib/types'
 import type { CategoryAmount, MonthTrend } from './BudgetCharts'
 import { CategoryBadge } from '@/components/CategoryBadge'
+import { MonthPicker, type MonthValue } from '@/components/MonthPicker'
 
 const BudgetCharts = dynamic(() => import('./BudgetCharts'), { ssr: false })
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-function currentMonthRange() {
-  const now = new Date()
-  const y = now.getFullYear()
-  const m = now.getMonth() + 1
-  const first = `${y}-${String(m).padStart(2, '0')}-01`
-  const lastDay = new Date(y, m, 0).getDate()
-  const last = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
-  const label = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+function monthRange(year: number, month: number) {
+  const first = `${year}-${String(month).padStart(2, '0')}-01`
+  const lastDay = new Date(year, month, 0).getDate()
+  const last = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
+  const label = new Date(year, month - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
   return { first, last, label }
 }
 
-function last6MonthRanges() {
+function last6MonthRanges(year: number, month: number) {
   const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  const now = new Date()
   return Array.from({ length: 6 }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1)
+    const d = new Date(year, month - 1 - (5 - i), 1)
     const y = d.getFullYear()
     const m = d.getMonth() + 1
     const first = `${y}-${String(m).padStart(2, '0')}-01`
@@ -266,16 +263,20 @@ export default function BudgetPage() {
   const [categoryData, setCategoryData] = useState<CategoryAmount[]>([])
   const [monthLabel, setMonthLabel] = useState('')
   const [loading, setLoading] = useState(true)
+  const [selectedMonth, setSelectedMonth] = useState<MonthValue>(() => {
+    const now = new Date()
+    return { year: now.getFullYear(), month: now.getMonth() + 1 }
+  })
 
   useEffect(() => {
-    setMonthLabel(currentMonthRange().label)
-    fetchAll()
-  }, [])
+    fetchAll(selectedMonth.year, selectedMonth.month)
+  }, [selectedMonth])
 
-  async function fetchAll() {
+  async function fetchAll(year: number, month: number) {
     setLoading(true)
-    const { first: mStart, last: mEnd } = currentMonthRange()
-    const months = last6MonthRanges()
+    const { first: mStart, last: mEnd, label } = monthRange(year, month)
+    setMonthLabel(label)
+    const months = last6MonthRanges(year, month)
     const sixStart = months[0].first
 
     const [
@@ -360,7 +361,10 @@ export default function BudgetPage() {
 
   return (
     <div className="space-y-8">
-      <h1 className="text-xl font-bold text-slate-800">Budget Overview</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold text-slate-800">Budget Overview</h1>
+        <MonthPicker value={selectedMonth} onChange={setSelectedMonth} />
+      </div>
 
       {/* ── Section 1: Monthly Summary ─────────────────────────────────────── */}
       <div>
