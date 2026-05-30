@@ -261,6 +261,7 @@ export default function BudgetPage() {
   const [variableCategories, setVariableCategories] = useState<string[]>([])
   const [trendData, setTrendData] = useState<MonthTrend[]>([])
   const [categoryData, setCategoryData] = useState<CategoryAmount[]>([])
+  const [monthlySavings, setMonthlySavings] = useState(0)
   const [monthLabel, setMonthLabel] = useState('')
   const [loading, setLoading] = useState(true)
   const [selectedMonth, setSelectedMonth] = useState<MonthValue>(() => {
@@ -285,12 +286,16 @@ export default function BudgetPage() {
       { data: income6mo },
       { data: exp6mo },
       { data: targets },
+      { data: savingsAcctMonth },
+      { data: savingsGoalMonth },
     ] = await Promise.all([
       supabase.from('income').select('net_amount').gte('paycheck_date', mStart).lte('paycheck_date', mEnd),
       supabase.from('expenses').select('amount, category').gte('date', mStart).lte('date', mEnd),
       supabase.from('income').select('net_amount, paycheck_date').gte('paycheck_date', sixStart),
       supabase.from('expenses').select('amount, date').gte('date', sixStart),
       supabase.from('budget_targets').select('*'),
+      supabase.from('savings_contributions').select('amount').gte('date', mStart).lte('date', mEnd),
+      supabase.from('savings_goal_contributions').select('amount').gte('date', mStart).lte('date', mEnd),
     ])
 
     // Current month totals
@@ -325,6 +330,10 @@ export default function BudgetPage() {
       return { month: label, income: inc, expenses: exp }
     })
 
+    const savings =
+      (savingsAcctMonth?.reduce((s, r) => s + Number(r.amount), 0) ?? 0) +
+      (savingsGoalMonth?.reduce((s, r) => s + Number(r.amount), 0) ?? 0)
+
     setMonthIncome(netIncome)
     setMonthExpenses(totalExp)
     setExpensesByCategory(byCat)
@@ -335,6 +344,7 @@ export default function BudgetPage() {
     setVariableCategories(varCats)
     setCategoryData(catChartData)
     setTrendData(trend)
+    setMonthlySavings(savings)
     setLoading(false)
   }
 
@@ -356,8 +366,7 @@ export default function BudgetPage() {
 
   const net = monthIncome - monthExpenses
   const netPositive = net >= 0
-  const savings = 0
-  const personalSpending = monthIncome - fixedExpenses - variableExpenses - savings
+  const personalSpending = monthIncome - fixedExpenses - variableExpenses - monthlySavings
 
   return (
     <div className="space-y-8">
@@ -411,7 +420,7 @@ export default function BudgetPage() {
 
             <span className="text-slate-300 mx-1">−</span>
 
-            <span className="font-semibold text-slate-400">{usd(savings)}</span>
+            <span className="font-semibold text-slate-400">{usd(monthlySavings)}</span>
             <span className="text-slate-400">savings</span>
 
             <span className="text-slate-300 mx-1">=</span>

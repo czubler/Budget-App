@@ -4,10 +4,11 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 const tabs = [
-  { href: '/',         label: 'Add Expense', icon: 'ti-plus'      },
-  { href: '/expenses', label: 'Expenses',     icon: 'ti-list'      },
-  { href: '/income',   label: 'Income',       icon: 'ti-coins'     },
-  { href: '/budget',   label: 'Budget',       icon: 'ti-chart-pie' },
+  { href: '/',         label: 'Add Expense', icon: 'ti-plus'       },
+  { href: '/expenses', label: 'Expenses',    icon: 'ti-list'       },
+  { href: '/income',   label: 'Income',      icon: 'ti-coins'      },
+  { href: '/savings',  label: 'Savings',     icon: 'ti-piggy-bank' },
+  { href: '/budget',   label: 'Budget',      icon: 'ti-chart-pie'  },
 ]
 
 export default function Navigation() {
