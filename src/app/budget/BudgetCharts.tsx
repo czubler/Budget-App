@@ -5,15 +5,10 @@ import {
   LineChart, Line, Legend,
   PieChart, Pie,
 } from 'recharts'
+import { getCategoryConfig } from '@/lib/categoryConfig'
 
 export type CategoryAmount = { category: string; amount: number }
 export type MonthTrend = { month: string; income: number; expenses: number }
-
-const PALETTE = [
-  '#6366f1', '#10b981', '#f59e0b', '#ef4444', '#3b82f6',
-  '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#f97316',
-  '#14b8a6', '#fb7185', '#fbbf24', '#34d399', '#94a3b8',
-]
 
 function usd(v: number) {
   return `$${v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
@@ -55,7 +50,7 @@ function CategoryBarChart({ data }: { data: CategoryAmount[] }) {
         <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickFormatter={usd} width={58} />
         <Tooltip formatter={(v) => [usd(Number(v)), 'Spent']} contentStyle={tooltipStyle} cursor={{ fill: '#f8fafc' }} />
         <Bar dataKey="amount" radius={[3, 3, 0, 0]} maxBarSize={44}>
-          {data.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
+          {data.map((entry, i) => <Cell key={i} fill={getCategoryConfig(entry.category).iconBg} />)}
         </Bar>
       </BarChart>
     </ResponsiveContainer>
@@ -119,7 +114,7 @@ function DonutChart({ data }: { data: CategoryAmount[] }) {
           labelLine={false}
           label={PieLabel}
         >
-          {nonZero.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
+          {nonZero.map((entry, i) => <Cell key={i} fill={getCategoryConfig(entry.category).iconBg} />)}
         </Pie>
         <Tooltip formatter={(v, name) => [usd(Number(v)), name]} contentStyle={tooltipStyle} />
         <Legend wrapperStyle={{ fontSize: 11 }} />

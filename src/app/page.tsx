@@ -4,15 +4,11 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
 import type { Expense } from '@/lib/types'
+import { useCategories } from '@/lib/useCategories'
+import { CategoryPicker } from '@/components/CategoryPicker'
 
 const PAYMENT_METHODS = [
   'Cash', 'Credit Card', 'Debit Card', 'Venmo', 'Zelle', 'Check', 'Other',
-]
-
-const CATEGORIES = [
-  'Rent', 'Gas Bill', 'Electricity', 'Wifi', 'Water', 'Groceries',
-  'Car Insurance', 'Subscriptions', 'Transit', 'Social', 'Home',
-  'Clothing', 'Dining', 'Entertainment', 'Other',
 ]
 
 function todayString() {
@@ -46,6 +42,7 @@ export default function AddExpensePage() {
   const [recentExpenses, setRecentExpenses] = useState<Expense[]>([])
   const [recentLoading, setRecentLoading] = useState(true)
   const descriptionRef = useRef<HTMLInputElement>(null)
+  const { names: categories } = useCategories()
 
   useEffect(() => { fetchRecent() }, [])
 
@@ -173,33 +170,27 @@ export default function AddExpensePage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Payment Method</label>
-            <select
-              value={form.payment_method}
-              onChange={(e) => setForm({ ...form, payment_method: e.target.value })}
-              className={inputCls}
-            >
-              <option value="">Select...</option>
-              {PAYMENT_METHODS.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
-            <select
-              value={form.category}
-              onChange={(e) => setForm({ ...form, category: e.target.value })}
-              className={inputCls}
-            >
-              <option value="">Select...</option>
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-          </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Payment Method</label>
+          <select
+            value={form.payment_method}
+            onChange={(e) => setForm({ ...form, payment_method: e.target.value })}
+            className={inputCls}
+          >
+            <option value="">Select...</option>
+            {PAYMENT_METHODS.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
+          <CategoryPicker
+            value={form.category}
+            onChange={(v) => setForm({ ...form, category: v })}
+            categories={categories}
+          />
         </div>
 
         <div>

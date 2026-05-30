@@ -4,15 +4,13 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
 import type { Expense } from '@/lib/types'
+import { useCategories } from '@/lib/useCategories'
+import { CategoryBadge } from '@/components/CategoryBadge'
+import { CategoryPicker } from '@/components/CategoryPicker'
 
 const PAGE_SIZE = 25
 
 const PAYMENT_METHODS = ['Cash', 'Credit Card', 'Debit Card', 'Venmo', 'Zelle', 'Check', 'Other']
-const CATEGORIES = [
-  'Rent', 'Gas Bill', 'Electricity', 'Wifi', 'Water', 'Groceries',
-  'Car Insurance', 'Subscriptions', 'Transit', 'Social', 'Home',
-  'Clothing', 'Dining', 'Entertainment', 'Other',
-]
 
 type SortCol = 'date' | 'description' | 'merchant' | 'category' | 'amount' | 'payment_method'
 
@@ -125,6 +123,7 @@ function EditModal({
   onClose: () => void
   onSave: (updated: Expense) => void
 }) {
+  const { names: categories } = useCategories()
   const [form, setForm] = useState({
     description: expense.description ?? '',
     merchant: expense.merchant ?? '',
@@ -188,21 +187,20 @@ function EditModal({
               <input required type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className={`${inputCls} w-full`} />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Payment Method</label>
-              <select value={form.payment_method} onChange={(e) => setForm({ ...form, payment_method: e.target.value })} className={`${inputCls} w-full`}>
-                <option value="">Select...</option>
-                {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
-              <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={`${inputCls} w-full`}>
-                <option value="">Select...</option>
-                {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Payment Method</label>
+            <select value={form.payment_method} onChange={(e) => setForm({ ...form, payment_method: e.target.value })} className={`${inputCls} w-full`}>
+              <option value="">Select...</option>
+              {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
+            <CategoryPicker
+              value={form.category}
+              onChange={(v) => setForm({ ...form, category: v })}
+              categories={categories}
+            />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Notes <span className="text-xs font-normal text-slate-400">(optional)</span></label>
@@ -233,6 +231,7 @@ function formatDate(dateStr: string) {
 }
 
 export default function ExpensesPage() {
+  const { names: categories } = useCategories()
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(0)
@@ -386,7 +385,7 @@ export default function ExpensesPage() {
               className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             />
           </div>
-          <MultiSelect options={CATEGORIES} selected={filterCategories} onChange={setFilterCategories} placeholder="Category" />
+          <MultiSelect options={categories} selected={filterCategories} onChange={setFilterCategories} placeholder="Category" />
           <MultiSelect options={PAYMENT_METHODS} selected={filterPaymentMethods} onChange={setFilterPaymentMethods} placeholder="Payment Method" />
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -496,13 +495,10 @@ export default function ExpensesPage() {
                       </span>
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap">
-                      {expense.category ? (
-                        <span className="px-2 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-700">
-                          {expense.category}
-                        </span>
-                      ) : (
-                        <span className="text-slate-400">—</span>
-                      )}
+                      {expense.category
+                        ? <CategoryBadge category={expense.category} />
+                        : <span className="text-slate-400">—</span>
+                      }
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap text-right font-semibold text-slate-800">
                       ${Number(expense.amount).toFixed(2)}

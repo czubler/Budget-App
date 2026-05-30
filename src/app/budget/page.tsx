@@ -6,14 +6,9 @@ import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
 import type { BudgetTarget } from '@/lib/types'
 import type { CategoryAmount, MonthTrend } from './BudgetCharts'
+import { CategoryBadge } from '@/components/CategoryBadge'
 
 const BudgetCharts = dynamic(() => import('./BudgetCharts'), { ssr: false })
-
-// ─── constants ────────────────────────────────────────────────────────────────
-
-const FIXED_CATEGORIES = ['Rent', 'Gas Bill', 'Electricity', 'Wifi', 'Water', 'Car Insurance', 'Subscriptions', 'Transit']
-const VARIABLE_CATEGORIES = ['Groceries', 'Social', 'Home', 'Clothing', 'Dining', 'Entertainment', 'Other']
-const ALL_CATEGORIES = [...FIXED_CATEGORIES, ...VARIABLE_CATEGORIES]
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -60,9 +55,9 @@ function progressColor(actual: number, budget: number) {
 // ─── sub-components ───────────────────────────────────────────────────────────
 
 function BannerCard({
-  emoji, label, value, sub, highlight,
+  icon, label, value, sub, highlight,
 }: {
-  emoji: string; label: string; value: string; sub?: string; highlight?: 'green' | 'red'
+  icon: string; label: string; value: string; sub?: string; highlight?: 'green' | 'red'
 }) {
   const valueColor =
     highlight === 'green' ? 'text-emerald-600' :
@@ -70,7 +65,10 @@ function BannerCard({
     'text-slate-800'
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-4 flex flex-col gap-1">
-      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{emoji} {label}</p>
+      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+        <i className={`ti ${icon}`} style={{ fontSize: 13 }} />
+        {label}
+      </p>
       <p className={`text-2xl font-bold tracking-tight ${valueColor}`}>{value}</p>
       {sub && <p className="text-xs text-slate-400">{sub}</p>}
     </div>
@@ -211,7 +209,7 @@ function BudgetTableSection({
           <tbody className="divide-y divide-slate-100">
             {rows.map(({ cat, budget, actual, diff, pct }) => (
               <tr key={cat} className="hover:bg-slate-50 transition-colors">
-                <td className="py-2.5 px-3 font-medium text-slate-800 whitespace-nowrap">{cat}</td>
+                <td className="py-2.5 px-3 whitespace-nowrap"><CategoryBadge category={cat} /></td>
                 <td className="py-2.5 px-3">
                   <BudgetCell category={cat} currentValue={budget} onSave={onSaveTarget} />
                 </td>
@@ -262,6 +260,8 @@ export default function BudgetPage() {
   const [fixedExpenses, setFixedExpenses] = useState(0)
   const [variableExpenses, setVariableExpenses] = useState(0)
   const [budgetTargets, setBudgetTargets] = useState<BudgetTarget[]>([])
+  const [fixedCategories, setFixedCategories] = useState<string[]>([])
+  const [variableCategories, setVariableCategories] = useState<string[]>([])
   const [trendData, setTrendData] = useState<MonthTrend[]>([])
   const [categoryData, setCategoryData] = useState<CategoryAmount[]>([])
   const [monthLabel, setMonthLabel] = useState('')
@@ -303,11 +303,13 @@ export default function BudgetPage() {
       byCat[cat] = (byCat[cat] ?? 0) + Number(e.amount)
     })
 
-    const fixedTotal = FIXED_CATEGORIES.reduce((s, c) => s + (byCat[c] ?? 0), 0)
-    const variableTotal = VARIABLE_CATEGORIES.reduce((s, c) => s + (byCat[c] ?? 0), 0)
+    const fixedCats = targets?.filter((t) => t.is_recurring).map((t) => t.category) ?? []
+    const varCats = targets?.filter((t) => !t.is_recurring).map((t) => t.category) ?? []
+    const fixedTotal = fixedCats.reduce((s, c) => s + (byCat[c] ?? 0), 0)
+    const variableTotal = varCats.reduce((s, c) => s + (byCat[c] ?? 0), 0)
 
     // Category chart data (all known categories, filter zeros in chart)
-    const catChartData = ALL_CATEGORIES
+    const catChartData = [...fixedCats, ...varCats]
       .map((c) => ({ category: c, amount: byCat[c] ?? 0 }))
       .filter((d) => d.amount > 0)
 
@@ -328,6 +330,8 @@ export default function BudgetPage() {
     setFixedExpenses(fixedTotal)
     setVariableExpenses(variableTotal)
     setBudgetTargets(targets ?? [])
+    setFixedCategories(fixedCats)
+    setVariableCategories(varCats)
     setCategoryData(catChartData)
     setTrendData(trend)
     setLoading(false)
@@ -337,14 +341,14 @@ export default function BudgetPage() {
     const { error } = await supabase
       .from('budget_targets')
       .upsert(
-        { category, monthly_target: value, is_recurring: FIXED_CATEGORIES.includes(category) },
+        { category, monthly_target: value, is_recurring: fixedCategories.includes(category) },
         { onConflict: 'category' }
       )
     if (error) { toast.error('Failed to save target'); return }
     setBudgetTargets((prev) => {
       const exists = prev.some((t) => t.category === category)
       if (exists) return prev.map((t) => t.category === category ? { ...t, monthly_target: value } : t)
-      return [...prev, { id: '', category, monthly_target: value, is_recurring: FIXED_CATEGORIES.includes(category) }]
+      return [...prev, { id: '', category, monthly_target: value, is_recurring: fixedCategories.includes(category) }]
     })
     toast.success(`${category} target saved`)
   }
@@ -364,19 +368,19 @@ export default function BudgetPage() {
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
           <BannerCard
-            emoji="💰"
+            icon="ti-coins"
             label="Net Income"
             value={loading ? '—' : usd(monthIncome)}
             sub="from income table"
           />
           <BannerCard
-            emoji="💸"
+            icon="ti-credit-card"
             label="Expenses"
             value={loading ? '—' : usd(monthExpenses)}
             sub="all categories"
           />
           <BannerCard
-            emoji="🏦"
+            icon="ti-trending-up"
             label="Net"
             value={loading ? '—' : (netPositive ? `+${usd(net)}` : `-${usd(Math.abs(net))}`)}
             sub="income − expenses"
@@ -441,7 +445,7 @@ export default function BudgetPage() {
             <>
               <BudgetTableSection
                 title="Fixed / Recurring"
-                categories={FIXED_CATEGORIES}
+                categories={fixedCategories}
                 targets={budgetTargets}
                 expensesByCategory={expensesByCategory}
                 onSaveTarget={handleSaveTarget}
@@ -449,7 +453,7 @@ export default function BudgetPage() {
               <div className="border-t border-slate-100 pt-6">
                 <BudgetTableSection
                   title="Variable / Daily"
-                  categories={VARIABLE_CATEGORIES}
+                  categories={variableCategories}
                   targets={budgetTargets}
                   expensesByCategory={expensesByCategory}
                   onSaveTarget={handleSaveTarget}
