@@ -9,6 +9,13 @@ type ConnStatus = 'checking' | 'ok' | 'error'
 type CatRow = { category: string; monthly_target: string; is_recurring: boolean }
 type AccountRow = { id: string; name: string; is_active: boolean }
 type GoalRow = { id: string; name: string; target_amount: string; is_archived: boolean }
+type PaymentMethodRow = { id: string; nickname: string; payment_due_date: string; is_active: boolean }
+
+function ordinal(n: number) {
+  const s = ['th', 'st', 'nd', 'rd']
+  const v = n % 100
+  return n + (s[(v - 20) % 10] || s[v] || s[0])
+}
 
 const targetInputCls =
   'w-28 pl-6 pr-2 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-right bg-white'
@@ -138,6 +145,16 @@ export default function SettingsPage() {
   const [addingGoal, setAddingGoal] = useState(false)
   const [goalDeleteConfirm, setGoalDeleteConfirm] = useState<string | null>(null)
 
+  // payment methods
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethodRow[]>([])
+  const [newMethodNickname, setNewMethodNickname] = useState('')
+  const [newMethodDueDate, setNewMethodDueDate] = useState('')
+  const [addingMethod, setAddingMethod] = useState(false)
+  const [methodDeleteConfirm, setMethodDeleteConfirm] = useState<string | null>(null)
+  const [editingMethodId, setEditingMethodId] = useState<string | null>(null)
+  const [editNickname, setEditNickname] = useState('')
+  const [editDueDate, setEditDueDate] = useState('')
+
   useEffect(() => { init() }, [])
 
   const fixed = rows.filter((r) => r.is_recurring)
@@ -146,6 +163,8 @@ export default function SettingsPage() {
   const archivedAccounts = accounts.filter((a) => !a.is_active)
   const activeGoals = goals.filter((g) => !g.is_archived)
   const archivedGoals = goals.filter((g) => g.is_archived)
+  const activeMethods = paymentMethods.filter((m) => m.is_active)
+  const archivedMethods = paymentMethods.filter((m) => !m.is_active)
 
   async function init() {
     setConnStatus('checking')
@@ -157,6 +176,7 @@ export default function SettingsPage() {
         { count: incCount, error: iErr },
         { data: acctData, error: aErr },
         { data: goalData, error: gErr },
+        { data: pmData, error: pmErr },
       ] = await Promise.all([
         supabase
           .from('budget_targets')
@@ -167,9 +187,10 @@ export default function SettingsPage() {
         supabase.from('income').select('*', { count: 'exact', head: true }),
         supabase.from('savings_accounts').select('id, name, is_active').order('name'),
         supabase.from('savings_goals').select('id, name, target_amount, is_archived').order('name'),
+        supabase.from('payment_methods').select('id, nickname, payment_due_date, is_active').order('nickname'),
       ])
 
-      if (tErr || eErr || iErr || aErr || gErr) throw new Error('Query failed')
+      if (tErr || eErr || iErr || aErr || gErr || pmErr) throw new Error('Query failed')
 
       setRows(
         targetData?.map((t) => ({
@@ -184,6 +205,12 @@ export default function SettingsPage() {
         goalData?.map((g) => ({
           ...g,
           target_amount: String(g.target_amount),
+        })) ?? []
+      )
+      setPaymentMethods(
+        pmData?.map((m) => ({
+          ...m,
+          payment_due_date: m.payment_due_date != null ? String(m.payment_due_date) : '',
         })) ?? []
       )
       setConnStatus('ok')
@@ -324,74 +351,70 @@ export default function SettingsPage() {
     toast.success(`"${name}" deleted`)
   }
 
+  // ─── Payment Methods ───────────────────────────────────────────────────────
+
+  async function addPaymentMethod() {
+    const nickname = newMethodNickname.trim()
+    if (!nickname) return
+    const dueDate = newMethodDueDate ? parseInt(newMethodDueDate) : null
+    if (dueDate !== null && (dueDate < 1 || dueDate > 31)) { toast.error('Due date must be 1–31'); return }
+    setAddingMethod(true)
+    const { data, error } = await supabase
+      .from('payment_methods')
+      .insert({ nickname, payment_due_date: dueDate })
+      .select('id, nickname, payment_due_date, is_active')
+      .single()
+    setAddingMethod(false)
+    if (error) { toast.error('Failed to add payment method'); return }
+    setPaymentMethods((prev) =>
+      [...prev, { ...data, payment_due_date: data.payment_due_date != null ? String(data.payment_due_date) : '' }]
+        .sort((a, b) => a.nickname.localeCompare(b.nickname))
+    )
+    setNewMethodNickname('')
+    setNewMethodDueDate('')
+    toast.success(`"${nickname}" added`)
+  }
+
+  async function savePaymentMethod(id: string) {
+    const nickname = editNickname.trim()
+    if (!nickname) return
+    const dueDate = editDueDate ? parseInt(editDueDate) : null
+    if (dueDate !== null && (dueDate < 1 || dueDate > 31)) { toast.error('Due date must be 1–31'); return }
+    const { error } = await supabase
+      .from('payment_methods')
+      .update({ nickname, payment_due_date: dueDate })
+      .eq('id', id)
+    if (error) { toast.error('Failed to update'); return }
+    setPaymentMethods((prev) =>
+      prev.map((m) => m.id === id ? { ...m, nickname, payment_due_date: editDueDate } : m)
+    )
+    setEditingMethodId(null)
+    toast.success('Payment method updated')
+  }
+
+  async function archivePaymentMethod(id: string, archive: boolean) {
+    const { error } = await supabase
+      .from('payment_methods')
+      .update({ is_active: !archive })
+      .eq('id', id)
+    if (error) { toast.error('Failed to update'); return }
+    setPaymentMethods((prev) => prev.map((m) => m.id === id ? { ...m, is_active: !archive } : m))
+    toast.success(archive ? 'Payment method archived' : 'Payment method restored')
+  }
+
+  async function deletePaymentMethod(id: string, nickname: string) {
+    const { error } = await supabase.from('payment_methods').delete().eq('id', id)
+    if (error) { toast.error('Failed to delete'); return }
+    setPaymentMethods((prev) => prev.filter((m) => m.id !== id))
+    setMethodDeleteConfirm(null)
+    toast.success(`"${nickname}" deleted`)
+  }
+
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
 
   return (
     <div className="space-y-8">
       <h1 className="text-xl font-bold text-slate-800">Settings</h1>
-
-      {/* ── Connection Status ────────────────────────────────────────────── */}
-      <section>
-        <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
-          Supabase Connection
-        </h2>
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-slate-700 mb-0.5">Project URL</p>
-              <p className="text-xs text-slate-400 font-mono break-all">
-                {supabaseUrl || <span className="text-red-400">NEXT_PUBLIC_SUPABASE_URL not set</span>}
-              </p>
-            </div>
-            <span
-              className={`shrink-0 flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full ${
-                connStatus === 'ok' ? 'bg-emerald-50 text-emerald-700' :
-                connStatus === 'error' ? 'bg-red-50 text-red-600' :
-                'bg-slate-100 text-slate-500'
-              }`}
-            >
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${
-                  connStatus === 'ok' ? 'bg-emerald-500' :
-                  connStatus === 'error' ? 'bg-red-500 animate-pulse' :
-                  'bg-slate-400 animate-pulse'
-                }`}
-              />
-              {connStatus === 'ok' ? 'Connected' : connStatus === 'error' ? 'Error' : 'Checking…'}
-            </span>
-          </div>
-
-          {loading ? (
-            <div className="grid grid-cols-2 gap-3">
-              {[0, 1].map((i) => (
-                <div key={i} className="bg-slate-50 rounded-lg px-4 py-3">
-                  <Bone className="h-2.5 w-20 mb-2" />
-                  <Bone className="h-6 w-12" />
-                </div>
-              ))}
-            </div>
-          ) : stats ? (
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-slate-50 rounded-lg px-4 py-3">
-                <p className="text-xs text-slate-400 mb-0.5">Expenses logged</p>
-                <p className="text-xl font-bold text-slate-800">{stats.expenses.toLocaleString()}</p>
-              </div>
-              <div className="bg-slate-50 rounded-lg px-4 py-3">
-                <p className="text-xs text-slate-400 mb-0.5">Income entries</p>
-                <p className="text-xl font-bold text-slate-800">{stats.income.toLocaleString()}</p>
-              </div>
-            </div>
-          ) : null}
-
-          <button
-            onClick={init}
-            disabled={testing}
-            className="text-xs text-indigo-600 hover:text-indigo-700 font-medium disabled:opacity-50 transition-colors"
-          >
-            {testing ? '↺ Testing…' : '↺ Test connection'}
-          </button>
-        </div>
-      </section>
 
       {/* ── Categories & Budget Targets ──────────────────────────────────── */}
       <section>
@@ -602,6 +625,188 @@ export default function SettingsPage() {
         </div>
       </section>
 
+      {/* ── Payment Methods ──────────────────────────────────────────────── */}
+      <section>
+        <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
+          Payment Methods
+        </h2>
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm divide-y divide-slate-100">
+          {loading ? (
+            <div className="p-5 space-y-3">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <Bone className="h-3.5 flex-1" />
+                  <Bone className="h-3.5 w-16" />
+                  <Bone className="h-7 w-16 rounded-md" />
+                  <Bone className="h-7 w-14 rounded-md" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <>
+              {activeMethods.length > 0 && (
+                <div className="p-5">
+                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Active</h3>
+                  {activeMethods.map((method) => (
+                    <div key={method.id} className="py-2.5 border-b border-slate-50 last:border-0">
+                      {editingMethodId === method.id ? (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <input
+                            type="text"
+                            value={editNickname}
+                            onChange={(e) => setEditNickname(e.target.value)}
+                            placeholder="Nickname"
+                            className="flex-1 min-w-[120px] px-3 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                          />
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-xs text-slate-500">Due day</span>
+                            <input
+                              type="number"
+                              min="1"
+                              max="31"
+                              value={editDueDate}
+                              onChange={(e) => setEditDueDate(e.target.value)}
+                              placeholder="—"
+                              className="w-16 px-2 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-center"
+                            />
+                          </div>
+                          <button
+                            onClick={() => savePaymentMethod(method.id)}
+                            disabled={!editNickname.trim()}
+                            className="text-xs px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-lg font-medium transition-colors shrink-0"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={() => setEditingMethodId(null)}
+                            className="text-xs px-2.5 py-1 border border-slate-300 hover:bg-slate-50 text-slate-600 rounded-lg font-medium transition-colors shrink-0"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-3">
+                          <i className="ti ti-credit-card text-slate-400" style={{ fontSize: 15 }} />
+                          <span className="text-sm text-slate-700 flex-1 min-w-0 truncate">{method.nickname}</span>
+                          {method.payment_due_date && (
+                            <span className="text-xs text-slate-400 shrink-0">
+                              Due {ordinal(parseInt(method.payment_due_date))}
+                            </span>
+                          )}
+                          <button
+                            onClick={() => {
+                              setEditingMethodId(method.id)
+                              setEditNickname(method.nickname)
+                              setEditDueDate(method.payment_due_date)
+                            }}
+                            className="text-xs px-2.5 py-1 border border-slate-300 hover:bg-slate-50 text-slate-500 rounded-lg font-medium transition-colors shrink-0"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => archivePaymentMethod(method.id, true)}
+                            className="text-xs px-2.5 py-1 border border-slate-300 hover:bg-slate-50 text-slate-500 rounded-lg font-medium transition-colors shrink-0"
+                          >
+                            Archive
+                          </button>
+                          {methodDeleteConfirm === method.id ? (
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="text-xs text-slate-500">Delete?</span>
+                              <button
+                                onClick={() => deletePaymentMethod(method.id, method.nickname)}
+                                className="text-xs px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded font-medium"
+                              >
+                                Yes
+                              </button>
+                              <button
+                                onClick={() => setMethodDeleteConfirm(null)}
+                                className="text-xs px-2 py-1 border border-slate-300 hover:bg-slate-50 text-slate-600 rounded font-medium"
+                              >
+                                No
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setMethodDeleteConfirm(method.id)}
+                              className="text-slate-300 hover:text-red-400 transition-colors text-lg leading-none"
+                              title={`Delete ${method.nickname}`}
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {archivedMethods.length > 0 && (
+                <div className="p-5">
+                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Archived</h3>
+                  {archivedMethods.map((method) => (
+                    <div key={method.id} className="flex items-center gap-3 py-2.5 border-b border-slate-50 last:border-0 opacity-60">
+                      <i className="ti ti-credit-card text-slate-400" style={{ fontSize: 15 }} />
+                      <span className="text-sm text-slate-500 flex-1 min-w-0 truncate line-through">{method.nickname}</span>
+                      {method.payment_due_date && (
+                        <span className="text-xs text-slate-400 shrink-0">
+                          Due {ordinal(parseInt(method.payment_due_date))}
+                        </span>
+                      )}
+                      <button
+                        onClick={() => archivePaymentMethod(method.id, false)}
+                        className="text-xs px-2.5 py-1 border border-slate-300 hover:bg-slate-50 text-slate-500 rounded-lg font-medium transition-colors shrink-0"
+                      >
+                        Restore
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add Payment Method */}
+              <div className="p-5 bg-slate-50 rounded-b-xl">
+                <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Add Payment Method</h3>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <input
+                    type="text"
+                    value={newMethodNickname}
+                    onChange={(e) => setNewMethodNickname(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && addPaymentMethod()}
+                    placeholder="e.g. Chase Sapphire"
+                    className="flex-1 min-w-[140px] px-3 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                  />
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-xs text-slate-500">Due day</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="31"
+                      value={newMethodDueDate}
+                      onChange={(e) => setNewMethodDueDate(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && addPaymentMethod()}
+                      placeholder="—"
+                      className="w-16 px-2 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-center"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addPaymentMethod}
+                    disabled={!newMethodNickname.trim() || addingMethod}
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white text-xs font-semibold rounded-lg transition-colors shrink-0"
+                  >
+                    {addingMethod ? 'Adding…' : '+ Add'}
+                  </button>
+                </div>
+                <p className="text-xs text-slate-400 mt-2.5">
+                  Archiving hides the card from dropdowns without losing expense history. Due date is optional — just for reference.
+                </p>
+              </div>
+            </>
+          )}
+        </div>
+      </section>
+
       {/* ── Savings Goals ────────────────────────────────────────────────── */}
       <section>
         <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
@@ -724,6 +929,69 @@ export default function SettingsPage() {
               </div>
             </>
           )}
+        </div>
+      </section>
+
+      {/* ── Connection Status ────────────────────────────────────────────── */}
+      <section>
+        <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
+          Supabase Connection
+        </h2>
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-slate-700 mb-0.5">Project URL</p>
+              <p className="text-xs text-slate-400 font-mono break-all">
+                {supabaseUrl || <span className="text-red-400">NEXT_PUBLIC_SUPABASE_URL not set</span>}
+              </p>
+            </div>
+            <span
+              className={`shrink-0 flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full ${
+                connStatus === 'ok' ? 'bg-emerald-50 text-emerald-700' :
+                connStatus === 'error' ? 'bg-red-50 text-red-600' :
+                'bg-slate-100 text-slate-500'
+              }`}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  connStatus === 'ok' ? 'bg-emerald-500' :
+                  connStatus === 'error' ? 'bg-red-500 animate-pulse' :
+                  'bg-slate-400 animate-pulse'
+                }`}
+              />
+              {connStatus === 'ok' ? 'Connected' : connStatus === 'error' ? 'Error' : 'Checking…'}
+            </span>
+          </div>
+
+          {loading ? (
+            <div className="grid grid-cols-2 gap-3">
+              {[0, 1].map((i) => (
+                <div key={i} className="bg-slate-50 rounded-lg px-4 py-3">
+                  <Bone className="h-2.5 w-20 mb-2" />
+                  <Bone className="h-6 w-12" />
+                </div>
+              ))}
+            </div>
+          ) : stats ? (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-slate-50 rounded-lg px-4 py-3">
+                <p className="text-xs text-slate-400 mb-0.5">Expenses logged</p>
+                <p className="text-xl font-bold text-slate-800">{stats.expenses.toLocaleString()}</p>
+              </div>
+              <div className="bg-slate-50 rounded-lg px-4 py-3">
+                <p className="text-xs text-slate-400 mb-0.5">Income entries</p>
+                <p className="text-xl font-bold text-slate-800">{stats.income.toLocaleString()}</p>
+              </div>
+            </div>
+          ) : null}
+
+          <button
+            onClick={init}
+            disabled={testing}
+            className="text-xs text-indigo-600 hover:text-indigo-700 font-medium disabled:opacity-50 transition-colors"
+          >
+            {testing ? '↺ Testing…' : '↺ Test connection'}
+          </button>
         </div>
       </section>
     </div>

@@ -5,12 +5,14 @@ import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
 import type { Expense } from '@/lib/types'
 import { useCategories } from '@/lib/useCategories'
+import { usePaymentMethods } from '@/lib/usePaymentMethods'
 import { CategoryBadge } from '@/components/CategoryBadge'
 import { CategoryPicker } from '@/components/CategoryPicker'
+import type { PaymentMethod } from '@/lib/types'
 
 const PAGE_SIZE = 25
 
-const PAYMENT_METHODS = ['Cash', 'Credit Card', 'Debit Card', 'Venmo', 'Zelle', 'Check', 'Other']
+const STATIC_PAYMENT_METHODS = ['Cash', 'Credit Card', 'Debit Card', 'Venmo', 'Zelle', 'Check', 'Other']
 
 type SortCol = 'date' | 'description' | 'merchant' | 'category' | 'amount' | 'payment_method'
 
@@ -116,10 +118,12 @@ const inputCls =
 
 function EditModal({
   expense,
+  dbPaymentMethods,
   onClose,
   onSave,
 }: {
   expense: Expense
+  dbPaymentMethods: PaymentMethod[]
   onClose: () => void
   onSave: (updated: Expense) => void
 }) {
@@ -191,7 +195,20 @@ function EditModal({
             <label className="block text-sm font-medium text-slate-700 mb-1">Payment Method</label>
             <select value={form.payment_method} onChange={(e) => setForm({ ...form, payment_method: e.target.value })} className={`${inputCls} w-full`}>
               <option value="">Select...</option>
-              {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+              {dbPaymentMethods.length > 0 && (
+                <optgroup label="Cards">
+                  {dbPaymentMethods.map((m) => <option key={m.id} value={m.nickname}>{m.nickname}</option>)}
+                </optgroup>
+              )}
+              <optgroup label={dbPaymentMethods.length > 0 ? 'Other' : ''}>
+                {STATIC_PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+                {/* show legacy value if not already in any list */}
+                {form.payment_method &&
+                  !dbPaymentMethods.some((m) => m.nickname === form.payment_method) &&
+                  !STATIC_PAYMENT_METHODS.includes(form.payment_method) && (
+                    <option value={form.payment_method}>{form.payment_method}</option>
+                  )}
+              </optgroup>
             </select>
           </div>
           <div>
@@ -232,6 +249,9 @@ function formatDate(dateStr: string) {
 
 export default function ExpensesPage() {
   const { names: categories } = useCategories()
+  const { methods: dbPaymentMethods } = usePaymentMethods()
+  const _pmSet = new Set([...dbPaymentMethods.map((m) => m.nickname), ...STATIC_PAYMENT_METHODS])
+  const paymentMethodOptions = Array.from(_pmSet)
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(0)
@@ -386,7 +406,7 @@ export default function ExpensesPage() {
             />
           </div>
           <MultiSelect options={categories} selected={filterCategories} onChange={setFilterCategories} placeholder="Category" />
-          <MultiSelect options={PAYMENT_METHODS} selected={filterPaymentMethods} onChange={setFilterPaymentMethods} placeholder="Payment Method" />
+          <MultiSelect options={paymentMethodOptions} selected={filterPaymentMethods} onChange={setFilterPaymentMethods} placeholder="Payment Method" />
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-xs text-slate-500 font-medium">Date range:</span>
@@ -588,6 +608,7 @@ export default function ExpensesPage() {
       {editingExpense && (
         <EditModal
           expense={editingExpense}
+          dbPaymentMethods={dbPaymentMethods}
           onClose={() => setEditingExpense(null)}
           onSave={handleEditSave}
         />

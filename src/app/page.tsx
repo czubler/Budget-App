@@ -5,11 +5,10 @@ import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
 import type { Expense } from '@/lib/types'
 import { useCategories } from '@/lib/useCategories'
+import { usePaymentMethods } from '@/lib/usePaymentMethods'
 import { CategoryPicker } from '@/components/CategoryPicker'
 
-const PAYMENT_METHODS = [
-  'Cash', 'Credit Card', 'Debit Card', 'Venmo', 'Zelle', 'Check', 'Other',
-]
+const STATIC_PAYMENT_METHODS = ['Cash', 'Credit Card', 'Debit Card', 'Venmo', 'Zelle', 'Check', 'Other']
 
 function todayString() {
   const d = new Date()
@@ -23,7 +22,7 @@ function formatDate(dateStr: string) {
   })
 }
 
-const defaultForm = (paymentMethod = 'Credit Card') => ({
+const defaultForm = (paymentMethod = '') => ({
   description: '',
   merchant: '',
   amount: '',
@@ -43,6 +42,7 @@ export default function AddExpensePage() {
   const [recentLoading, setRecentLoading] = useState(true)
   const descriptionRef = useRef<HTMLInputElement>(null)
   const { names: categories } = useCategories()
+  const { methods: dbPaymentMethods } = usePaymentMethods()
 
   useEffect(() => { fetchRecent() }, [])
 
@@ -178,9 +178,18 @@ export default function AddExpensePage() {
             className={inputCls}
           >
             <option value="">Select...</option>
-            {PAYMENT_METHODS.map((m) => (
-              <option key={m} value={m}>{m}</option>
-            ))}
+            {dbPaymentMethods.length > 0 && (
+              <optgroup label="Cards">
+                {dbPaymentMethods.map((m) => (
+                  <option key={m.id} value={m.nickname}>{m.nickname}</option>
+                ))}
+              </optgroup>
+            )}
+            <optgroup label={dbPaymentMethods.length > 0 ? 'Other' : ''}>
+              {STATIC_PAYMENT_METHODS.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </optgroup>
           </select>
         </div>
 

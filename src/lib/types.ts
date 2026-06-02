@@ -54,6 +54,14 @@ export type SavingsGoal = {
   created_at: string
 }
 
+export type PaymentMethod = {
+  id: string
+  nickname: string
+  payment_due_date: number | null
+  is_active: boolean
+  created_at: string
+}
+
 export type SavingsGoalContribution = {
   id: string
   goal_id: string
