@@ -25,7 +25,9 @@ A personal budget tracker I built for myself. It's not a SaaS product — just a
 
 ### Pages
 
-**Add Expense (`/`)** — Home page. Quick form to log an expense: description, merchant, amount, date, payment method (dropdown from user-managed list), category (chip picker), notes. Shows 5 most recent expenses below.
+**Add Expense (`/`)** — Home page. Quick form to log an expense: description, merchant, amount, date, payment method (dropdown — user-managed cards appear under "Cards" optgroup, with static fallbacks: Cash, Credit Card, Debit Card, Venmo, Zelle, Check, Other), category (chip picker), notes. Press `/` from anywhere on the page to jump focus to the description field. Shows 5 most recent expenses below.
+
+Recurring expense support: a "Recurring expense" checkbox expands a panel to configure type (subscription / utility), frequency (monthly / weekly / biweekly / yearly), and the appropriate day picker (day of month, day of week, or month + day for yearly). The current expense is logged immediately; a record is also inserted into `recurring_expenses` with the schedule. On every page load, `/api/process-recurring` is called to auto-generate any overdue occurrences since the last visit, showing a toast if new rows were added.
 
 **All Expenses (`/expenses`)** — Paginated table (25/page) of every expense. Debounced search, multi-select category + payment method filters, date range picker, sortable columns, inline edit modal, inline delete, running total for filtered view, CSV export. Category column shows colored `CategoryBadge`.
 
@@ -40,13 +42,13 @@ A personal budget tracker I built for myself. It's not a SaaS product — just a
 4. Budget vs. Actual table: **three sections** — Fixed/Recurring, Utilities, Variable/Daily — each category with inline-editable monthly target, actual spent, remaining, color progress bar
 5. Charts: bar chart (spending by category), line chart (6-month income vs. expenses trend), donut chart (expense breakdown)
 
-**Settings (`/settings`)** — Six sections:
+**Settings (`/settings`)** — Seven sections:
 1. **Categories & Budget Targets**: add, delete, toggle Fixed / Utility / Variable (three-way selector), set monthly targets — full CRUD on `budget_targets`. Three display sections: Fixed/Recurring, Utilities, Variable/Daily.
 2. **Savings Accounts**: add, archive/restore, delete — manages `savings_accounts`
 3. **Payment Methods**: add (nickname + optional due date + optional statement close date), edit, archive/restore, delete — manages `payment_methods` table. `expenses.payment_method` stores the nickname string.
 4. **Savings Goals**: add (name + target amount), archive/restore, delete — manages `savings_goals`
 5. **Pay Rate Tiers**: add/edit/delete overtime tiers (label + multiplier). Regular tier is system-protected (can't delete, can't rename). Used in the income entry form to calculate gross from a tier breakdown. Stored in `overtime_rules`.
-6. **Demo Data**: "Reset Demo Data" button with a confirmation warning — wipes all data and loads 3 months of realistic demo entries (April–June 2026)
+6. **Demo Data**: "Reset Demo Data" button with a confirmation warning — wipes all data and loads 3 months of realistic demo entries (April–June 2026). ⚠️ Known issue: the reset-demo API doesn't set `category_type`, so all budget targets land in Variable after a reset — they need to be manually re-typed in Settings.
 7. **Supabase Connection**: project URL, live record counts, connection health check
 
 ### UI / design system
@@ -79,7 +81,9 @@ User-managed via Settings → Payment Methods. Stored in a `payment_methods` tab
 
 **`income`**: id, source, paycheck_date, gross_amount, taxes_withheld, net_amount, hours_worked, hourly_rate, notes, created_at
 
-**`budget_targets`**: id, category, monthly_target, is_recurring, category_type ('fixed'|'utility'|'variable'), created_at
+**`budget_targets`**: id, category, monthly_target, is_recurring, category_type ('fixed'|'utility'|'variable', default 'variable'), created_at
+
+**`recurring_expenses`**: id, description, merchant, amount, category, payment_method, notes, type ('subscription'|'utility'), frequency ('monthly'|'weekly'|'biweekly'|'yearly'), day_of_month (int|null), day_of_week (int|null), month_of_year (int|null), start_date, next_due_date, is_active, created_at
 
 **`payment_methods`**: id, nickname, payment_due_date (int, day of month), statement_close_date (int, day of month), is_active, created_at
 
@@ -94,6 +98,16 @@ User-managed via Settings → Payment Methods. Stored in a `payment_methods` tab
 **`overtime_rules`**: id, label, multiplier, sort_order, created_at — seeded with Regular (1×), Overtime (1.5×), Double Time (2×)
 
 **`income_hours_breakdown`**: id, income_id (→ income), rule_id (→ overtime_rules, nullable), label, multiplier, hours_worked, base_rate, subtotal, created_at
+
+---
+
+## API routes & automation
+
+**`POST /api/process-recurring`** — Called on Add Expense page load. Queries `recurring_expenses` for active records where `next_due_date ≤ today`, inserts any missed expense rows into `expenses`, and advances `next_due_date` to the next occurrence. Can backfill multiple missed occurrences in one call if the app wasn't opened for a while.
+
+**`GET /api/cron/payment-reminders`** — Vercel cron job, runs daily at 8:00 AM (configured in `vercel.json`). Requires `Authorization: Bearer <CRON_SECRET>` header. Proxies to a Supabase Edge Function (`send-payment-reminders`) which sends payment reminder emails based on `payment_methods.payment_due_date` and `statement_close_date`.
+
+**`POST /api/reset-demo`** — Wipes all user data and reloads the demo dataset (April–June 2026). Called by the Settings → Demo Data button.
 
 ---
 
