@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
-import type { Income } from '@/lib/types'
+import type { Income, OvertimeRule, IncomeHoursBreakdown } from '@/lib/types'
 import { Bone } from '@/components/Skeleton'
 import { MonthPicker, type MonthValue } from '@/components/MonthPicker'
 
@@ -33,6 +33,20 @@ function computeNet(gross: string, taxes: string): string {
   return g > 0 && g - t >= 0 ? (g - t).toFixed(2) : ''
 }
 
+function calcBreakdownGross(
+  baseRate: string,
+  breakdown: Array<{ ruleId: string; hours: string }>,
+  rules: OvertimeRule[]
+): number {
+  const rate = parseFloat(baseRate) || 0
+  return breakdown.reduce((sum, b) => {
+    const rule = rules.find((r) => r.id === b.ruleId)
+    const mult = rule ? Number(rule.multiplier) : 1
+    const hrs = parseFloat(b.hours) || 0
+    return sum + rate * mult * hrs
+  }, 0)
+}
+
 // ─── styles ───────────────────────────────────────────────────────────────────
 
 const fieldCls =
@@ -46,7 +60,6 @@ const dollarFieldCls =
 type FormState = {
   source: string
   paycheck_date: string
-  hours_worked: string
   hourly_rate: string
   gross_amount: string
   taxes_withheld: string
@@ -57,13 +70,23 @@ type FormState = {
 const defaultForm = (): FormState => ({
   source: '',
   paycheck_date: todayString(),
-  hours_worked: '',
   hourly_rate: '',
   gross_amount: '',
   taxes_withheld: '',
   net_amount: '',
   notes: '',
 })
+
+type EditFormState = {
+  source: string
+  paycheck_date: string
+  hours_worked: string
+  hourly_rate: string
+  gross_amount: string
+  taxes_withheld: string
+  net_amount: string
+  notes: string
+}
 
 // ─── DollarInput ──────────────────────────────────────────────────────────────
 
@@ -119,7 +142,7 @@ function SummaryCard({
   )
 }
 
-// ─── IncomeForm (shared by add + edit) ────────────────────────────────────────
+// ─── IncomeForm (EditModal only) ──────────────────────────────────────────────
 
 function IncomeForm({
   form,
@@ -133,8 +156,8 @@ function IncomeForm({
   submitLabel,
   onCancel,
 }: {
-  form: FormState
-  setForm: (f: FormState) => void
+  form: EditFormState
+  setForm: (f: EditFormState) => void
   netEdited: boolean
   onGrossChange: (v: string) => void
   onTaxesChange: (v: string) => void
@@ -146,7 +169,6 @@ function IncomeForm({
 }) {
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      {/* Source */}
       <div>
         <label className="block text-sm font-medium text-slate-700 mb-1">
           Source <span className="text-red-400">*</span>
@@ -161,7 +183,6 @@ function IncomeForm({
         />
       </div>
 
-      {/* Paycheck Date + Hours */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">
@@ -189,7 +210,6 @@ function IncomeForm({
         </div>
       </div>
 
-      {/* Hourly Rate + Gross */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">Hourly Rate</label>
@@ -207,7 +227,6 @@ function IncomeForm({
         </div>
       </div>
 
-      {/* Taxes + Net */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">Taxes Withheld</label>
@@ -228,7 +247,6 @@ function IncomeForm({
         </div>
       </div>
 
-      {/* Notes */}
       <div>
         <label className="block text-sm font-medium text-slate-700 mb-1">
           Notes <span className="text-xs font-normal text-slate-400">(optional)</span>
@@ -242,7 +260,6 @@ function IncomeForm({
         />
       </div>
 
-      {/* Actions */}
       {onCancel ? (
         <div className="flex gap-3 pt-1">
           <button
@@ -284,7 +301,7 @@ function EditModal({
   onClose: () => void
   onSave: (updated: Income) => void
 }) {
-  const [form, setForm] = useState<FormState>({
+  const [form, setForm] = useState<EditFormState>({
     source: income.source,
     paycheck_date: income.paycheck_date,
     hours_worked: income.hours_worked != null ? String(income.hours_worked) : '',
@@ -372,10 +389,35 @@ export default function IncomePage() {
     const now = new Date()
     return { year: now.getFullYear(), month: now.getMonth() + 1 }
   })
+  const [overtimeRules, setOvertimeRules] = useState<OvertimeRule[]>([])
+  const [breakdown, setBreakdown] = useState<Array<{ ruleId: string; hours: string }>>([])
+  const [grossLocked, setGrossLocked] = useState(false)
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+  const [breakdownCache, setBreakdownCache] = useState<Record<string, IncomeHoursBreakdown[]>>({})
+
+  useEffect(() => {
+    loadOvertimeRules()
+  }, [])
 
   useEffect(() => {
     fetchData(selectedMonth.year, selectedMonth.month)
   }, [selectedMonth])
+
+  async function loadOvertimeRules() {
+    const { data } = await supabase
+      .from('overtime_rules')
+      .select('id, label, multiplier, sort_order, created_at')
+      .order('sort_order')
+    const rules: OvertimeRule[] = (data ?? []).map((r) => ({
+      id: r.id,
+      label: r.label,
+      multiplier: Number(r.multiplier),
+      sort_order: r.sort_order,
+      created_at: r.created_at ?? '',
+    }))
+    setOvertimeRules(rules)
+    setBreakdown(rules.map((r) => ({ ruleId: r.id, hours: '' })))
+  }
 
   async function fetchData(year: number, month: number) {
     setLoading(true)
@@ -402,30 +444,102 @@ export default function IncomePage() {
     }
   }
 
-  const handleGross = (v: string) =>
-    setForm((f) => ({ ...f, gross_amount: v, net_amount: netEdited ? f.net_amount : computeNet(v, f.taxes_withheld) }))
-  const handleTaxes = (v: string) =>
-    setForm((f) => ({ ...f, taxes_withheld: v, net_amount: netEdited ? f.net_amount : computeNet(f.gross_amount, v) }))
-  const handleNet = (v: string) => { setNetEdited(true); setForm((f) => ({ ...f, net_amount: v })) }
+  function handleRateChange(v: string) {
+    const gross = calcBreakdownGross(v, breakdown, overtimeRules)
+    setForm((f) => {
+      const newGross = !grossLocked && gross > 0 ? gross.toFixed(2) : grossLocked ? f.gross_amount : ''
+      return {
+        ...f,
+        hourly_rate: v,
+        gross_amount: newGross,
+        net_amount: !netEdited ? computeNet(newGross, f.taxes_withheld) : f.net_amount,
+      }
+    })
+  }
+
+  function handleBreakdownChange(ruleId: string, hours: string) {
+    const newBreakdown = breakdown.map((b) => (b.ruleId === ruleId ? { ...b, hours } : b))
+    setBreakdown(newBreakdown)
+    if (!grossLocked) {
+      const gross = calcBreakdownGross(form.hourly_rate, newBreakdown, overtimeRules)
+      setForm((f) => {
+        const newGross = gross > 0 ? gross.toFixed(2) : ''
+        return {
+          ...f,
+          gross_amount: newGross,
+          net_amount: !netEdited ? computeNet(newGross, f.taxes_withheld) : f.net_amount,
+        }
+      })
+    }
+  }
+
+  function handleGrossManual(v: string) {
+    setGrossLocked(true)
+    setForm((f) => ({ ...f, gross_amount: v, net_amount: !netEdited ? computeNet(v, f.taxes_withheld) : f.net_amount }))
+  }
+
+  function handleTaxesChange(v: string) {
+    setForm((f) => ({ ...f, taxes_withheld: v, net_amount: !netEdited ? computeNet(f.gross_amount, v) : f.net_amount }))
+  }
+
+  function handleNetChange(v: string) {
+    setNetEdited(true)
+    setForm((f) => ({ ...f, net_amount: v }))
+  }
+
+  function unlockGross() {
+    setGrossLocked(false)
+    const gross = calcBreakdownGross(form.hourly_rate, breakdown, overtimeRules)
+    setForm((f) => ({ ...f, gross_amount: gross > 0 ? gross.toFixed(2) : '' }))
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSubmitting(true)
-    const { error } = await supabase.from('income').insert({
-      source: form.source,
-      paycheck_date: form.paycheck_date,
-      hours_worked: form.hours_worked ? parseFloat(form.hours_worked) : null,
-      hourly_rate: form.hourly_rate ? parseFloat(form.hourly_rate) : null,
-      gross_amount: parseFloat(form.gross_amount),
-      taxes_withheld: form.taxes_withheld ? parseFloat(form.taxes_withheld) : null,
-      net_amount: form.net_amount ? parseFloat(form.net_amount) : null,
-      notes: form.notes || null,
-    })
+    const filledBreakdown = breakdown.filter((b) => parseFloat(b.hours) > 0)
+    const totalHours = filledBreakdown.reduce((sum, b) => sum + (parseFloat(b.hours) || 0), 0)
+    const { data: incomeData, error } = await supabase
+      .from('income')
+      .insert({
+        source: form.source,
+        paycheck_date: form.paycheck_date,
+        hours_worked: totalHours > 0 ? totalHours : null,
+        hourly_rate: form.hourly_rate ? parseFloat(form.hourly_rate) : null,
+        gross_amount: parseFloat(form.gross_amount),
+        taxes_withheld: form.taxes_withheld ? parseFloat(form.taxes_withheld) : null,
+        net_amount: form.net_amount ? parseFloat(form.net_amount) : null,
+        notes: form.notes || null,
+      })
+      .select()
+      .single()
+    if (error) { toast.error('Failed to save income'); setSubmitting(false); return }
+
+    if (filledBreakdown.length > 0 && form.hourly_rate && incomeData) {
+      const baseRate = parseFloat(form.hourly_rate)
+      const rows = filledBreakdown.map((b) => {
+        const rule = overtimeRules.find((r) => r.id === b.ruleId)!
+        const hrs = parseFloat(b.hours)
+        const mult = Number(rule.multiplier)
+        return {
+          income_id: incomeData.id,
+          rule_id: b.ruleId,
+          label: rule.label,
+          multiplier: mult,
+          hours_worked: hrs,
+          base_rate: baseRate,
+          subtotal: parseFloat((baseRate * mult * hrs).toFixed(2)),
+        }
+      })
+      const { error: bErr } = await supabase.from('income_hours_breakdown').insert(rows)
+      if (bErr) toast.error('Income saved, but breakdown failed to save')
+    }
+
     setSubmitting(false)
-    if (error) { toast.error('Failed to save income'); return }
     toast.success('Income logged!')
     setForm(defaultForm())
     setNetEdited(false)
+    setGrossLocked(false)
+    setBreakdown(overtimeRules.map((r) => ({ ruleId: r.id, hours: '' })))
     fetchData(selectedMonth.year, selectedMonth.month)
   }
 
@@ -434,6 +548,8 @@ export default function IncomePage() {
     if (error) { toast.error('Failed to delete'); return }
     toast.success('Income deleted')
     setDeleteId(null)
+    setExpandedIds((prev) => { const n = new Set(prev); n.delete(id); return n })
+    setBreakdownCache((prev) => { const n = { ...prev }; delete n[id]; return n })
     fetchData(selectedMonth.year, selectedMonth.month)
   }
 
@@ -442,6 +558,27 @@ export default function IncomePage() {
     setEditingIncome(null)
     fetchData(selectedMonth.year, selectedMonth.month)
   }
+
+  async function toggleExpand(id: string) {
+    const next = new Set(expandedIds)
+    if (next.has(id)) {
+      next.delete(id)
+      setExpandedIds(next)
+    } else {
+      next.add(id)
+      setExpandedIds(next)
+      if (!(id in breakdownCache)) {
+        const { data } = await supabase
+          .from('income_hours_breakdown')
+          .select('*')
+          .eq('income_id', id)
+          .order('created_at')
+        setBreakdownCache((prev) => ({ ...prev, [id]: (data ?? []) as IncomeHoursBreakdown[] }))
+      }
+    }
+  }
+
+  const showBreakdownTable = overtimeRules.length > 0 && !!form.hourly_rate
 
   return (
     <div>
@@ -453,17 +590,173 @@ export default function IncomePage() {
       {/* Add income form */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-8">
         <h2 className="text-sm font-semibold text-slate-700 mb-4">Log Income</h2>
-        <IncomeForm
-          form={form}
-          setForm={setForm}
-          netEdited={netEdited}
-          onGrossChange={handleGross}
-          onTaxesChange={handleTaxes}
-          onNetChange={handleNet}
-          onSubmit={handleSubmit}
-          submitting={submitting}
-          submitLabel="+ Log Income"
-        />
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Source */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Source <span className="text-red-400">*</span>
+            </label>
+            <input
+              required
+              type="text"
+              value={form.source}
+              onChange={(e) => setForm({ ...form, source: e.target.value })}
+              placeholder="Main Job, Freelance, Side Project…"
+              className={fieldCls}
+            />
+          </div>
+
+          {/* Paycheck Date */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Paycheck Date <span className="text-red-400">*</span>
+            </label>
+            <input
+              required
+              type="date"
+              value={form.paycheck_date}
+              onChange={(e) => setForm({ ...form, paycheck_date: e.target.value })}
+              className={fieldCls}
+            />
+          </div>
+
+          {/* Hourly Rate */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Hourly Rate</label>
+            <DollarInput
+              value={form.hourly_rate}
+              onChange={handleRateChange}
+              placeholder="Optional — enter to use breakdown table"
+            />
+          </div>
+
+          {/* Per-tier breakdown table */}
+          {showBreakdownTable && (
+            <div className="rounded-lg border border-indigo-100 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-indigo-50">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-indigo-600">Tier</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-indigo-600">Effective Rate</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-indigo-600">Hours</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-indigo-600">Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-indigo-50">
+                  {breakdown.map((b) => {
+                    const rule = overtimeRules.find((r) => r.id === b.ruleId)
+                    const mult = rule ? Number(rule.multiplier) : 1
+                    const effectiveRate = (parseFloat(form.hourly_rate) || 0) * mult
+                    const hrs = parseFloat(b.hours) || 0
+                    const subtotal = effectiveRate * hrs
+                    return (
+                      <tr key={b.ruleId} className="bg-white">
+                        <td className="px-3 py-2 text-slate-700 font-medium">{rule?.label}</td>
+                        <td className="px-3 py-2 text-right text-slate-500 text-xs whitespace-nowrap">
+                          ${effectiveRate.toFixed(2)}/hr
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            value={b.hours}
+                            onChange={(e) => handleBreakdownChange(b.ruleId, e.target.value)}
+                            placeholder="0"
+                            className="w-20 px-2 py-1 border border-slate-300 rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-right font-semibold text-slate-700 whitespace-nowrap">
+                          {subtotal > 0 ? `$${subtotal.toFixed(2)}` : <span className="text-slate-300">—</span>}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-indigo-50">
+                    <td colSpan={3} className="px-3 py-2 text-right text-xs font-semibold text-indigo-600">
+                      Total
+                    </td>
+                    <td className="px-3 py-2 text-right font-bold text-indigo-700">
+                      ${calcBreakdownGross(form.hourly_rate, breakdown, overtimeRules).toFixed(2)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+
+          {/* Gross Amount */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-sm font-medium text-slate-700">
+                Gross Amount <span className="text-red-400">*</span>
+              </label>
+              {grossLocked && showBreakdownTable && (
+                <button
+                  type="button"
+                  onClick={unlockGross}
+                  className="text-xs text-indigo-500 hover:text-indigo-700 font-medium transition-colors"
+                >
+                  ↺ Use breakdown total
+                </button>
+              )}
+              {!grossLocked && showBreakdownTable && form.gross_amount && (
+                <span className="text-xs text-indigo-400">auto-calculated</span>
+              )}
+            </div>
+            <DollarInput
+              value={form.gross_amount}
+              onChange={handleGrossManual}
+              required
+              highlighted={!grossLocked && !!form.gross_amount && showBreakdownTable}
+            />
+          </div>
+
+          {/* Taxes + Net */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Taxes Withheld</label>
+              <DollarInput value={form.taxes_withheld} onChange={handleTaxesChange} placeholder="0.00" />
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5 mb-1">
+                <label className="text-sm font-medium text-slate-700">Net Amount</label>
+                {!netEdited && form.net_amount && (
+                  <span className="text-xs font-normal text-indigo-500">auto-calculated</span>
+                )}
+              </div>
+              <DollarInput
+                value={form.net_amount}
+                onChange={handleNetChange}
+                highlighted={!netEdited && !!form.net_amount}
+              />
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Notes <span className="text-xs font-normal text-slate-400">(optional)</span>
+            </label>
+            <textarea
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              rows={2}
+              placeholder="Any extra details…"
+              className={`${fieldCls} resize-none`}
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={submitting}
+            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:bg-emerald-400 text-white font-semibold rounded-lg transition-colors text-base shadow-sm cursor-pointer disabled:cursor-not-allowed"
+          >
+            {submitting ? 'Saving…' : '+ Log Income'}
+          </button>
+        </form>
       </div>
 
       {/* Monthly summary */}
@@ -562,74 +855,120 @@ export default function IncomePage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {history.map((entry) => (
-                  <tr key={entry.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-3 py-3 whitespace-nowrap text-xs text-slate-500">
-                      {formatDate(entry.paycheck_date)}
-                    </td>
-                    <td className="px-3 py-3 font-medium text-slate-800 max-w-[140px]">
-                      <span className="block truncate" title={entry.source}>{entry.source}</span>
-                    </td>
-                    <td className="px-3 py-3 text-right whitespace-nowrap font-semibold text-emerald-700">
-                      ${Number(entry.gross_amount).toFixed(2)}
-                    </td>
-                    <td className="px-3 py-3 text-right whitespace-nowrap text-rose-600">
-                      {entry.taxes_withheld != null
-                        ? `$${Number(entry.taxes_withheld).toFixed(2)}`
-                        : <span className="text-slate-400">—</span>}
-                    </td>
-                    <td className="px-3 py-3 text-right whitespace-nowrap font-semibold text-indigo-700">
-                      {entry.net_amount != null
-                        ? `$${Number(entry.net_amount).toFixed(2)}`
-                        : <span className="text-slate-400 font-normal">—</span>}
-                    </td>
-                    <td className="px-3 py-3 text-right whitespace-nowrap text-slate-500">
-                      {entry.hours_worked != null ? entry.hours_worked : <span className="text-slate-400">—</span>}
-                    </td>
-                    <td className="px-3 py-3 text-right whitespace-nowrap text-slate-500">
-                      {entry.hourly_rate != null
-                        ? `$${Number(entry.hourly_rate).toFixed(2)}`
-                        : <span className="text-slate-400">—</span>}
-                    </td>
-                    <td className="px-3 py-3 max-w-[160px]">
-                      <span className="block truncate text-xs text-slate-400" title={entry.notes ?? ''}>
-                        {entry.notes || '—'}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap text-right">
-                      {deleteId === entry.id ? (
-                        <div className="flex items-center justify-end gap-1.5">
-                          <span className="text-xs text-slate-500 mr-0.5">Delete?</span>
-                          <button
-                            onClick={() => handleDelete(entry.id)}
-                            className="text-xs px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded font-medium transition-colors"
-                          >
-                            Yes
-                          </button>
-                          <button
-                            onClick={() => setDeleteId(null)}
-                            className="text-xs px-2 py-1 border border-slate-300 hover:bg-slate-50 text-slate-600 rounded font-medium transition-colors"
-                          >
-                            No
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => setEditingIncome(entry)}
-                            className="text-xs px-2.5 py-1 border border-slate-300 hover:bg-slate-50 text-slate-600 rounded font-medium transition-colors"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => setDeleteId(entry.id)}
-                            className="text-xs px-2.5 py-1 border border-red-200 hover:bg-red-50 text-red-600 rounded font-medium transition-colors"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
+                  <Fragment key={entry.id}>
+                    <tr className="hover:bg-slate-50 transition-colors">
+                      <td className="px-3 py-3 whitespace-nowrap text-xs text-slate-500">
+                        <button
+                          type="button"
+                          onClick={() => toggleExpand(entry.id)}
+                          className="flex items-center gap-1 group text-left"
+                        >
+                          <i
+                            className={`ti ${expandedIds.has(entry.id) ? 'ti-chevron-down' : 'ti-chevron-right'} text-slate-300 group-hover:text-slate-500 transition-colors`}
+                            style={{ fontSize: 11 }}
+                          />
+                          {formatDate(entry.paycheck_date)}
+                        </button>
+                      </td>
+                      <td className="px-3 py-3 font-medium text-slate-800 max-w-[140px]">
+                        <span className="block truncate" title={entry.source}>{entry.source}</span>
+                      </td>
+                      <td className="px-3 py-3 text-right whitespace-nowrap font-semibold text-emerald-700">
+                        ${Number(entry.gross_amount).toFixed(2)}
+                      </td>
+                      <td className="px-3 py-3 text-right whitespace-nowrap text-rose-600">
+                        {entry.taxes_withheld != null
+                          ? `$${Number(entry.taxes_withheld).toFixed(2)}`
+                          : <span className="text-slate-400">—</span>}
+                      </td>
+                      <td className="px-3 py-3 text-right whitespace-nowrap font-semibold text-indigo-700">
+                        {entry.net_amount != null
+                          ? `$${Number(entry.net_amount).toFixed(2)}`
+                          : <span className="text-slate-400 font-normal">—</span>}
+                      </td>
+                      <td className="px-3 py-3 text-right whitespace-nowrap text-slate-500">
+                        {entry.hours_worked != null ? entry.hours_worked : <span className="text-slate-400">—</span>}
+                      </td>
+                      <td className="px-3 py-3 text-right whitespace-nowrap text-slate-500">
+                        {entry.hourly_rate != null
+                          ? `$${Number(entry.hourly_rate).toFixed(2)}`
+                          : <span className="text-slate-400">—</span>}
+                      </td>
+                      <td className="px-3 py-3 max-w-[160px]">
+                        <span className="block truncate text-xs text-slate-400" title={entry.notes ?? ''}>
+                          {entry.notes || '—'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap text-right">
+                        {deleteId === entry.id ? (
+                          <div className="flex items-center justify-end gap-1.5">
+                            <span className="text-xs text-slate-500 mr-0.5">Delete?</span>
+                            <button
+                              onClick={() => handleDelete(entry.id)}
+                              className="text-xs px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded font-medium transition-colors"
+                            >
+                              Yes
+                            </button>
+                            <button
+                              onClick={() => setDeleteId(null)}
+                              className="text-xs px-2 py-1 border border-slate-300 hover:bg-slate-50 text-slate-600 rounded font-medium transition-colors"
+                            >
+                              No
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => setEditingIncome(entry)}
+                              className="text-xs px-2.5 py-1 border border-slate-300 hover:bg-slate-50 text-slate-600 rounded font-medium transition-colors"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => setDeleteId(entry.id)}
+                              className="text-xs px-2.5 py-1 border border-red-200 hover:bg-red-50 text-red-600 rounded font-medium transition-colors"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                    {expandedIds.has(entry.id) && (
+                      <tr className="bg-indigo-50/40">
+                        <td colSpan={9} className="px-6 py-3 border-b border-indigo-100">
+                          {!(entry.id in breakdownCache) ? (
+                            <span className="text-xs text-slate-400 italic">Loading breakdown…</span>
+                          ) : breakdownCache[entry.id].length === 0 ? (
+                            <span className="text-xs text-slate-400">No breakdown recorded for this entry.</span>
+                          ) : (
+                            <table className="text-xs">
+                              <thead>
+                                <tr className="text-slate-400">
+                                  <th className="pr-8 py-1 text-left font-medium whitespace-nowrap">Tier</th>
+                                  <th className="pr-8 py-1 text-right font-medium whitespace-nowrap">Multiplier</th>
+                                  <th className="pr-8 py-1 text-right font-medium whitespace-nowrap">Hours</th>
+                                  <th className="pr-8 py-1 text-right font-medium whitespace-nowrap">Base Rate</th>
+                                  <th className="py-1 text-right font-medium whitespace-nowrap">Subtotal</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {breakdownCache[entry.id].map((b) => (
+                                  <tr key={b.id}>
+                                    <td className="pr-8 py-1 font-semibold text-slate-700">{b.label}</td>
+                                    <td className="pr-8 py-1 text-right text-slate-500 font-mono">{Number(b.multiplier)}×</td>
+                                    <td className="pr-8 py-1 text-right text-slate-500">{Number(b.hours_worked)} hrs</td>
+                                    <td className="pr-8 py-1 text-right text-slate-500">${Number(b.base_rate).toFixed(2)}/hr</td>
+                                    <td className="py-1 text-right font-semibold text-indigo-700">${Number(b.subtotal).toFixed(2)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

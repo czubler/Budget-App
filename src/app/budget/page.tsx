@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic'
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
-import type { BudgetTarget } from '@/lib/types'
+import type { BudgetTarget, SavingsAccount } from '@/lib/types'
 import type { CategoryAmount, MonthTrend } from './BudgetCharts'
 import { CategoryBadge } from '@/components/CategoryBadge'
 import { MonthPicker, type MonthValue } from '@/components/MonthPicker'
@@ -248,6 +248,131 @@ function BudgetTableSection({
   )
 }
 
+// ─── SweepModal ───────────────────────────────────────────────────────────────
+
+function SweepModal({
+  surplus,
+  monthLabel,
+  lastDayOfMonth,
+  savingsAccounts,
+  onClose,
+  onSaved,
+}: {
+  surplus: number
+  monthLabel: string
+  lastDayOfMonth: string
+  savingsAccounts: SavingsAccount[]
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [accountId, setAccountId] = useState(savingsAccounts[0]?.id ?? '')
+  const [amount, setAmount] = useState(surplus > 0 ? surplus.toFixed(2) : '')
+  const [date, setDate] = useState(lastDayOfMonth)
+  const [notes, setNotes] = useState(`${monthLabel} surplus sweep`)
+  const [saving, setSaving] = useState(false)
+
+  async function submit() {
+    const amt = parseFloat(amount)
+    if (!amt || amt <= 0) { toast.error('Enter a valid amount'); return }
+    if (!accountId) { toast.error('Select a savings account'); return }
+    setSaving(true)
+    const { error } = await supabase.from('savings_contributions').insert({
+      account_id: accountId,
+      amount: amt,
+      date,
+      notes: notes.trim() || null,
+    })
+    setSaving(false)
+    if (error) { toast.error('Failed to save'); return }
+    toast.success('Surplus swept to savings!')
+    onSaved()
+    onClose()
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <h2 className="text-base font-bold text-slate-800">Log Surplus as Savings</h2>
+            <p className="text-xs text-slate-400 mt-0.5">{monthLabel}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Account</label>
+            <select
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white"
+            >
+              {savingsAccounts.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Amount</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
+              <input
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="w-full pl-7 pr-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Date</label>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Notes</label>
+            <input
+              type="text"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            />
+          </div>
+        </div>
+
+        <div className="flex gap-2 mt-6">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2 border border-slate-300 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={saving}
+            className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 rounded-lg text-sm font-semibold text-white transition-colors"
+          >
+            {saving ? 'Saving…' : 'Log Savings'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── page ─────────────────────────────────────────────────────────────────────
 
 export default function BudgetPage() {
@@ -255,9 +380,11 @@ export default function BudgetPage() {
   const [monthExpenses, setMonthExpenses] = useState(0)
   const [expensesByCategory, setExpensesByCategory] = useState<Record<string, number>>({})
   const [fixedExpenses, setFixedExpenses] = useState(0)
+  const [utilityExpenses, setUtilityExpenses] = useState(0)
   const [variableExpenses, setVariableExpenses] = useState(0)
   const [budgetTargets, setBudgetTargets] = useState<BudgetTarget[]>([])
   const [fixedCategories, setFixedCategories] = useState<string[]>([])
+  const [utilityCategories, setUtilityCategories] = useState<string[]>([])
   const [variableCategories, setVariableCategories] = useState<string[]>([])
   const [trendData, setTrendData] = useState<MonthTrend[]>([])
   const [categoryData, setCategoryData] = useState<CategoryAmount[]>([])
@@ -268,8 +395,12 @@ export default function BudgetPage() {
     const now = new Date()
     return { year: now.getFullYear(), month: now.getMonth() + 1 }
   })
+  const [savingsAccounts, setSavingsAccounts] = useState<SavingsAccount[]>([])
+  const [sweepModalOpen, setSweepModalOpen] = useState(false)
+  const [wasSurplusSwept, setWasSurplusSwept] = useState(false)
 
   useEffect(() => {
+    setWasSurplusSwept(false)
     fetchAll(selectedMonth.year, selectedMonth.month)
   }, [selectedMonth])
 
@@ -288,6 +419,7 @@ export default function BudgetPage() {
       { data: targets },
       { data: savingsAcctMonth },
       { data: savingsGoalMonth },
+      { data: acctData },
     ] = await Promise.all([
       supabase.from('income').select('net_amount').gte('paycheck_date', mStart).lte('paycheck_date', mEnd),
       supabase.from('expenses').select('amount, category').gte('date', mStart).lte('date', mEnd),
@@ -296,6 +428,7 @@ export default function BudgetPage() {
       supabase.from('budget_targets').select('*'),
       supabase.from('savings_contributions').select('amount').gte('date', mStart).lte('date', mEnd),
       supabase.from('savings_goal_contributions').select('amount').gte('date', mStart).lte('date', mEnd),
+      supabase.from('savings_accounts').select('*').eq('is_active', true).order('name'),
     ])
 
     // Current month totals
@@ -309,13 +442,15 @@ export default function BudgetPage() {
       byCat[cat] = (byCat[cat] ?? 0) + Number(e.amount)
     })
 
-    const fixedCats = targets?.filter((t) => t.is_recurring).map((t) => t.category) ?? []
-    const varCats = targets?.filter((t) => !t.is_recurring).map((t) => t.category) ?? []
+    const fixedCats = targets?.filter((t) => t.category_type === 'fixed').map((t) => t.category) ?? []
+    const utilityCats = targets?.filter((t) => t.category_type === 'utility').map((t) => t.category) ?? []
+    const varCats = targets?.filter((t) => t.category_type === 'variable' || (t.category_type == null && !t.is_recurring)).map((t) => t.category) ?? []
     const fixedTotal = fixedCats.reduce((s, c) => s + (byCat[c] ?? 0), 0)
+    const utilityTotal = utilityCats.reduce((s, c) => s + (byCat[c] ?? 0), 0)
     const variableTotal = varCats.reduce((s, c) => s + (byCat[c] ?? 0), 0)
 
     // Category chart data (all known categories, filter zeros in chart)
-    const catChartData = [...fixedCats, ...varCats]
+    const catChartData = [...fixedCats, ...utilityCats, ...varCats]
       .map((c) => ({ category: c, amount: byCat[c] ?? 0 }))
       .filter((d) => d.amount > 0)
 
@@ -338,35 +473,48 @@ export default function BudgetPage() {
     setMonthExpenses(totalExp)
     setExpensesByCategory(byCat)
     setFixedExpenses(fixedTotal)
+    setUtilityExpenses(utilityTotal)
     setVariableExpenses(variableTotal)
     setBudgetTargets(targets ?? [])
     setFixedCategories(fixedCats)
+    setUtilityCategories(utilityCats)
     setVariableCategories(varCats)
     setCategoryData(catChartData)
     setTrendData(trend)
     setMonthlySavings(savings)
+    setSavingsAccounts(acctData ?? [])
     setLoading(false)
   }
 
   async function handleSaveTarget(category: string, value: number) {
+    const categoryType = fixedCategories.includes(category) ? 'fixed' : utilityCategories.includes(category) ? 'utility' : 'variable'
     const { error } = await supabase
       .from('budget_targets')
       .upsert(
-        { category, monthly_target: value, is_recurring: fixedCategories.includes(category) },
+        { category, monthly_target: value, is_recurring: categoryType === 'fixed', category_type: categoryType },
         { onConflict: 'category' }
       )
     if (error) { toast.error('Failed to save target'); return }
     setBudgetTargets((prev) => {
       const exists = prev.some((t) => t.category === category)
       if (exists) return prev.map((t) => t.category === category ? { ...t, monthly_target: value } : t)
-      return [...prev, { id: '', category, monthly_target: value, is_recurring: fixedCategories.includes(category) }]
+      return [...prev, { id: '', category, monthly_target: value, is_recurring: categoryType === 'fixed', category_type: categoryType }]
     })
     toast.success(`${category} target saved`)
   }
 
   const net = monthIncome - monthExpenses
   const netPositive = net >= 0
-  const personalSpending = monthIncome - fixedExpenses - variableExpenses - monthlySavings
+  const personalSpending = monthIncome - fixedExpenses - utilityExpenses - variableExpenses - monthlySavings
+
+  const now = new Date()
+  const isPastMonth =
+    selectedMonth.year < now.getFullYear() ||
+    (selectedMonth.year === now.getFullYear() && selectedMonth.month < now.getMonth() + 1)
+  const surplus = monthIncome - monthExpenses - monthlySavings
+  const fullyAllocated = wasSurplusSwept && surplus <= 0
+  const showSurplusCard = !loading && isPastMonth && monthIncome > 0 && (surplus > 0 || fullyAllocated)
+  const lastDayOfMonth = `${selectedMonth.year}-${String(selectedMonth.month).padStart(2, '0')}-${String(new Date(selectedMonth.year, selectedMonth.month, 0).getDate()).padStart(2, '0')}`
 
   return (
     <div className="space-y-8">
@@ -415,6 +563,11 @@ export default function BudgetPage() {
 
             <span className="text-slate-300 mx-1">−</span>
 
+            <span className="font-semibold text-slate-700">{usd(utilityExpenses)}</span>
+            <span className="text-slate-400">utilities</span>
+
+            <span className="text-slate-300 mx-1">−</span>
+
             <span className="font-semibold text-slate-700">{usd(variableExpenses)}</span>
             <span className="text-slate-400">variable</span>
 
@@ -432,6 +585,49 @@ export default function BudgetPage() {
           </div>
         </div>
       </div>
+
+      {/* ── Surplus Card ──────────────────────────────────────────────────── */}
+      {showSurplusCard && (
+        fullyAllocated ? (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-5 py-4 flex items-center gap-3">
+            <i className="ti ti-circle-check text-emerald-500" style={{ fontSize: 22 }} />
+            <div>
+              <p className="text-sm font-semibold text-emerald-800">Fully allocated ✓</p>
+              <p className="text-xs text-emerald-600 mt-0.5">{monthLabel} surplus has been swept to savings.</p>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold text-amber-600 uppercase tracking-wider flex items-center gap-1.5 mb-1">
+                  <i className="ti ti-sparkles" style={{ fontSize: 13 }} />
+                  Month-end Surplus
+                </p>
+                <p className="text-3xl font-bold text-amber-900 mb-2">{usd(surplus)}</p>
+                <p className="text-xs text-amber-600">
+                  {usd(monthIncome)} income − {usd(monthExpenses)} expenses − {usd(monthlySavings)} savings = {usd(surplus)} surplus
+                </p>
+              </div>
+              <div className="shrink-0 mt-1">
+                {savingsAccounts.length === 0 ? (
+                  <p className="text-xs text-amber-600 italic max-w-[180px] text-right">
+                    Add a savings account in Settings to log this surplus
+                  </p>
+                ) : (
+                  <button
+                    onClick={() => setSweepModalOpen(true)}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-amber-500 hover:bg-amber-600 active:bg-amber-700 transition-colors whitespace-nowrap"
+                  >
+                    <i className="ti ti-piggy-bank" style={{ fontSize: 14 }} />
+                    Log as savings
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      )}
 
       {/* ── Section 2: Budget vs. Actual ───────────────────────────────────── */}
       <div>
@@ -463,6 +659,17 @@ export default function BudgetPage() {
                 expensesByCategory={expensesByCategory}
                 onSaveTarget={handleSaveTarget}
               />
+              {utilityCategories.length > 0 && (
+                <div className="border-t border-slate-100 pt-6">
+                  <BudgetTableSection
+                    title="Utilities"
+                    categories={utilityCategories}
+                    targets={budgetTargets}
+                    expensesByCategory={expensesByCategory}
+                    onSaveTarget={handleSaveTarget}
+                  />
+                </div>
+              )}
               <div className="border-t border-slate-100 pt-6">
                 <BudgetTableSection
                   title="Variable / Daily"
@@ -488,6 +695,20 @@ export default function BudgetPage() {
           <BudgetCharts categoryData={categoryData} trendData={trendData} />
         )}
       </div>
+
+      {sweepModalOpen && (
+        <SweepModal
+          surplus={surplus}
+          monthLabel={monthLabel}
+          lastDayOfMonth={lastDayOfMonth}
+          savingsAccounts={savingsAccounts}
+          onClose={() => setSweepModalOpen(false)}
+          onSaved={() => {
+            setWasSurplusSwept(true)
+            fetchAll(selectedMonth.year, selectedMonth.month)
+          }}
+        />
+      )}
     </div>
   )
 }

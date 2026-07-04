@@ -22,24 +22,28 @@ function todayStr() {
   return new Date().toISOString().slice(0, 10)
 }
 
-// ─── Contribute Modal ──────────────────────────────────────────────────────────
+// ─── Contribute / Edit Modal ───────────────────────────────────────────────────
 
 type ModalTarget =
   | { type: 'account'; id: string; name: string }
   | { type: 'goal'; id: string; name: string }
 
+type EditingContrib = { id: string; amount: number; date: string; notes: string | null }
+
 function ContributeModal({
   target,
+  editing,
   onClose,
   onSaved,
 }: {
   target: ModalTarget
+  editing?: EditingContrib
   onClose: () => void
   onSaved: () => void
 }) {
-  const [amount, setAmount] = useState('')
-  const [date, setDate] = useState(todayStr())
-  const [notes, setNotes] = useState('')
+  const [amount, setAmount] = useState(editing ? String(editing.amount) : '')
+  const [date, setDate] = useState(editing?.date ?? todayStr())
+  const [notes, setNotes] = useState(editing?.notes ?? '')
   const [saving, setSaving] = useState(false)
   const amtRef = useRef<HTMLInputElement>(null)
 
@@ -50,16 +54,27 @@ function ContributeModal({
     if (!amt || amt <= 0) { toast.error('Enter a valid amount'); return }
     setSaving(true)
     const table = target.type === 'account' ? 'savings_contributions' : 'savings_goal_contributions'
-    const fkKey = target.type === 'account' ? 'account_id' : 'goal_id'
-    const { error } = await supabase.from(table).insert({
-      [fkKey]: target.id,
-      amount: amt,
-      date,
-      notes: notes.trim() || null,
-    })
+
+    let error: unknown
+    if (editing) {
+      ;({ error } = await supabase.from(table).update({
+        amount: amt,
+        date,
+        notes: notes.trim() || null,
+      }).eq('id', editing.id))
+    } else {
+      const fkKey = target.type === 'account' ? 'account_id' : 'goal_id'
+      ;({ error } = await supabase.from(table).insert({
+        [fkKey]: target.id,
+        amount: amt,
+        date,
+        notes: notes.trim() || null,
+      }))
+    }
+
     setSaving(false)
     if (error) { toast.error('Failed to save'); return }
-    toast.success(`Contribution added to ${target.name}`)
+    toast.success(editing ? 'Contribution updated' : `Contribution added to ${target.name}`)
     onSaved()
     onClose()
   }
@@ -69,7 +84,9 @@ function ContributeModal({
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h2 className="text-base font-bold text-slate-800">Add Contribution</h2>
+            <h2 className="text-base font-bold text-slate-800">
+              {editing ? 'Edit Contribution' : 'Add Contribution'}
+            </h2>
             <p className="text-xs text-slate-400 mt-0.5">{target.name}</p>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
@@ -132,7 +149,7 @@ function ContributeModal({
             className="flex-1 py-2 rounded-lg text-sm font-semibold text-white transition-colors disabled:opacity-60"
             style={{ backgroundColor: '#7F77DD' }}
           >
-            {saving ? 'Saving…' : 'Save'}
+            {saving ? 'Saving…' : editing ? 'Save Changes' : 'Save'}
           </button>
         </div>
       </div>
@@ -149,6 +166,8 @@ function AccountCard({
   recentContribs,
   monthLabel,
   onContribute,
+  onEditContrib,
+  onDeleteContrib,
 }: {
   account: SavingsAccount
   totalSaved: number
@@ -156,8 +175,19 @@ function AccountCard({
   recentContribs: SavingsContribution[]
   monthLabel: string
   onContribute: () => void
+  onEditContrib: (c: SavingsContribution) => void
+  onDeleteContrib: (id: string) => Promise<void>
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  async function confirmDelete(id: string) {
+    setDeleting(true)
+    await onDeleteContrib(id)
+    setDeleting(false)
+    setDeleteConfirmId(null)
+  }
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -202,7 +232,40 @@ function AccountCard({
                     </p>
                     {c.notes && <p className="text-xs text-slate-400 truncate">{c.notes}</p>}
                   </div>
-                  <p className="text-sm font-semibold text-emerald-600">{usd(Number(c.amount))}</p>
+                  <p className="text-sm font-semibold text-emerald-600 shrink-0">{usd(Number(c.amount))}</p>
+                  {deleteConfirmId === c.id ? (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-xs text-slate-500">Delete?</span>
+                      <button
+                        onClick={() => confirmDelete(c.id)}
+                        disabled={deleting}
+                        className="text-xs px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded font-medium disabled:opacity-60"
+                      >
+                        Yes
+                      </button>
+                      <button
+                        onClick={() => setDeleteConfirmId(null)}
+                        className="text-xs px-2 py-1 border border-slate-300 hover:bg-slate-50 text-slate-600 rounded font-medium"
+                      >
+                        No
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        onClick={() => onEditContrib(c)}
+                        className="text-xs px-2 py-1 border border-slate-300 hover:bg-slate-50 text-slate-500 rounded font-medium transition-colors"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => setDeleteConfirmId(c.id)}
+                        className="text-xs px-2 py-1 border border-red-200 hover:bg-red-50 text-red-600 rounded font-medium transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -222,6 +285,8 @@ function GoalCard({
   recentContribs,
   monthLabel,
   onContribute,
+  onEditContrib,
+  onDeleteContrib,
 }: {
   goal: SavingsGoal
   totalSaved: number
@@ -229,11 +294,22 @@ function GoalCard({
   recentContribs: SavingsGoalContribution[]
   monthLabel: string
   onContribute: () => void
+  onEditContrib: (c: SavingsGoalContribution) => void
+  onDeleteContrib: (id: string) => Promise<void>
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const pct = goal.target_amount > 0 ? Math.min((totalSaved / goal.target_amount) * 100, 100) : 0
   const remaining = Math.max(goal.target_amount - totalSaved, 0)
   const done = totalSaved >= goal.target_amount
+
+  async function confirmDelete(id: string) {
+    setDeleting(true)
+    await onDeleteContrib(id)
+    setDeleting(false)
+    setDeleteConfirmId(null)
+  }
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -309,7 +385,40 @@ function GoalCard({
                     </p>
                     {c.notes && <p className="text-xs text-slate-400 truncate">{c.notes}</p>}
                   </div>
-                  <p className="text-sm font-semibold text-emerald-600">{usd(Number(c.amount))}</p>
+                  <p className="text-sm font-semibold text-emerald-600 shrink-0">{usd(Number(c.amount))}</p>
+                  {deleteConfirmId === c.id ? (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-xs text-slate-500">Delete?</span>
+                      <button
+                        onClick={() => confirmDelete(c.id)}
+                        disabled={deleting}
+                        className="text-xs px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded font-medium disabled:opacity-60"
+                      >
+                        Yes
+                      </button>
+                      <button
+                        onClick={() => setDeleteConfirmId(null)}
+                        className="text-xs px-2 py-1 border border-slate-300 hover:bg-slate-50 text-slate-600 rounded font-medium"
+                      >
+                        No
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        onClick={() => onEditContrib(c)}
+                        className="text-xs px-2 py-1 border border-slate-300 hover:bg-slate-50 text-slate-500 rounded font-medium transition-colors"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => setDeleteConfirmId(c.id)}
+                        className="text-xs px-2 py-1 border border-red-200 hover:bg-red-50 text-red-600 rounded font-medium transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -336,6 +445,7 @@ export default function SavingsPage() {
   const [loading, setLoading] = useState(true)
   const [monthLabel, setMonthLabel] = useState('')
   const [modal, setModal] = useState<ModalTarget | null>(null)
+  const [editModal, setEditModal] = useState<{ target: ModalTarget; contrib: EditingContrib } | null>(null)
 
   useEffect(() => {
     fetchAll(selectedMonth.year, selectedMonth.month)
@@ -369,6 +479,20 @@ export default function SavingsPage() {
     setGoalContribs(goalContribData ?? [])
     setMonthGoalContribs(monthGoalContribData ?? [])
     setLoading(false)
+  }
+
+  async function deleteAccountContrib(id: string) {
+    const { error } = await supabase.from('savings_contributions').delete().eq('id', id)
+    if (error) { toast.error('Failed to delete'); return }
+    toast.success('Contribution deleted')
+    fetchAll(selectedMonth.year, selectedMonth.month)
+  }
+
+  async function deleteGoalContrib(id: string) {
+    const { error } = await supabase.from('savings_goal_contributions').delete().eq('id', id)
+    if (error) { toast.error('Failed to delete'); return }
+    toast.success('Contribution deleted')
+    fetchAll(selectedMonth.year, selectedMonth.month)
   }
 
   const totalMonthSaved =
@@ -460,6 +584,13 @@ export default function SavingsPage() {
                 recentContribs={accountMonthList(acct.id)}
                 monthLabel={monthLabel}
                 onContribute={() => setModal({ type: 'account', id: acct.id, name: acct.name })}
+                onEditContrib={(c) =>
+                  setEditModal({
+                    target: { type: 'account', id: acct.id, name: acct.name },
+                    contrib: { id: c.id, amount: Number(c.amount), date: c.date, notes: c.notes },
+                  })
+                }
+                onDeleteContrib={deleteAccountContrib}
               />
             ))}
           </div>
@@ -488,6 +619,13 @@ export default function SavingsPage() {
                 recentContribs={goalMonthList(goal.id)}
                 monthLabel={monthLabel}
                 onContribute={() => setModal({ type: 'goal', id: goal.id, name: goal.name })}
+                onEditContrib={(c) =>
+                  setEditModal({
+                    target: { type: 'goal', id: goal.id, name: goal.name },
+                    contrib: { id: c.id, amount: Number(c.amount), date: c.date, notes: c.notes },
+                  })
+                }
+                onDeleteContrib={deleteGoalContrib}
               />
             ))}
           </div>
@@ -498,6 +636,15 @@ export default function SavingsPage() {
         <ContributeModal
           target={modal}
           onClose={() => setModal(null)}
+          onSaved={() => fetchAll(selectedMonth.year, selectedMonth.month)}
+        />
+      )}
+
+      {editModal && (
+        <ContributeModal
+          target={editModal.target}
+          editing={editModal.contrib}
+          onClose={() => setEditModal(null)}
           onSaved={() => fetchAll(selectedMonth.year, selectedMonth.month)}
         />
       )}
