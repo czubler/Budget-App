@@ -39,13 +39,13 @@ Three top-level sections with a context-sensitive sub-tab row beneath:
 
 - **Expense tab** — Full expense form: description, merchant, amount, date, payment method (dropdown — user-managed cards under "Cards" optgroup, static fallbacks: Cash, Credit Card, Debit Card, Venmo, Zelle, Check, Other), category (chip picker), notes. Press `/` from anywhere to focus the description field. Shows 5 most recent expenses below the form. On page load calls `/api/process-recurring` to auto-generate overdue recurring entries (toast if new rows added). Recurring expense checkbox expands a panel: type (subscription / utility), frequency (monthly / weekly / biweekly / yearly), day picker. Current expense logs immediately; a `recurring_expenses` row is inserted for future auto-generation.
 
-- **Income tab** — Full paycheck form: source (required), paycheck date (required), hourly rate (optional — entering it reveals a per-tier breakdown table if overtime rules exist), gross amount (auto-calculated from breakdown or manual override), taxes withheld, net amount (auto-calculated from gross − taxes, overridable), notes. Saves to `income` table; if breakdown was filled, also saves rows to `income_hours_breakdown`.
+- **Income tab** — Full paycheck form: source dropdown (populated from active `income_sources`; pre-selects the default source and auto-fills hourly rate on selection; falls back to free-text input if no sources exist in DB, with a "Add sources in Settings" hint), paycheck date (required), hourly rate (optional — entering it reveals a per-tier breakdown table if overtime rules exist), gross amount (auto-calculated from breakdown or manual override), taxes withheld, net amount (auto-calculated from gross − taxes, overridable), notes. On save: writes `income_source_id` to the income row and copies source name to the `source` text column. Also saves rows to `income_hours_breakdown` if breakdown was filled.
 
 - **Savings tab** — Contribution form: Account or Goal type picker (segmented button), dropdown of active accounts/goals (loaded from DB), amount (required), date (required), notes. Saves to `savings_contributions` or `savings_goal_contributions` based on selection.
 
 **All Expenses (`/expenses`)** — Paginated table (25/page) of every expense. Debounced search, multi-select category + payment method filters, date range picker, sortable columns, inline edit modal, inline delete, running total for filtered view, CSV export. Category column shows colored `CategoryBadge`.
 
-**Paychecks (`/income`)** — History-only Ledger view. Month picker at top. Monthly summary cards: Gross / Taxes / Net / Effective Tax Rate. Full history table with edit + delete; each row is expandable to show overtime tier breakdown. No add form — income is logged from Log > Income tab.
+**Paychecks (`/income`)** — History-only Ledger view. Month picker at top. **Source filter dropdown** (All sources / each active income_source by name / Unassigned) — filters both the history table and recomputes the monthly summary cards for the selected source. Monthly summary cards: Gross / Taxes / Net / Effective Tax Rate. Full history table with edit + delete; each row is expandable to show overtime tier breakdown. No add form — income is logged from Log > Income tab.
 
 **Savings (`/savings`)** — History-only Ledger view. Month picker at top. Two summary cards (this month total, all-time total). **Accounts section**: each active account shows total balance, this month's contributions, expandable monthly contribution history, each contribution row has Edit + Delete. **Goals section**: each active goal shows name, target amount, progress bar (purple fill → green when complete), "Complete!" badge, expandable monthly history, each contribution row has Edit + Delete. No "+ Add" buttons — contributions are logged from Log > Savings tab. Edit/delete of existing contributions still uses the ContributeModal.
 
@@ -71,7 +71,7 @@ Three top-level sections with a context-sensitive sub-tab row beneath:
 
 6. **Charts**: bar chart (spending by category), line chart (6-month income vs. expenses trend), donut chart (expense breakdown).
 
-**Settings (`/settings`)** — Eight sections:
+**Settings (`/settings`)** — Nine sections:
 
 1. **Projected Monthly Income**: Single number field for expected monthly net income. Saves to `app_settings` table. Shown on Budget page Projected formula bar.
 
@@ -85,9 +85,13 @@ Three top-level sections with a context-sensitive sub-tab row beneath:
 
 6. **Pay Rate Tiers**: add/edit/delete overtime tiers (label + multiplier). Regular tier is system-protected (can't delete, can't rename). Used in the income entry form to calculate gross from a tier breakdown. Stored in `overtime_rules`.
 
-7. **Demo Data**: "Reset Demo Data" button with a confirmation warning — wipes all data (including `recurring_expenses` and `income_hours_breakdown`) and loads 3 months of realistic demo entries (April–June 2026). Also seeds `projected_monthly_income = $4,000`. Demo categories are correctly typed on reset.
+7. **Income Sources**: add/edit/archive/restore/delete income sources (name + optional hourly rate). One source can be marked as default — pre-selected in the Log > Income form. `setDefaultSource` uses two-step UPDATE to enforce single-default invariant. Delete blocked if source has linked income rows. Stored in `income_sources`.
 
-8. **Supabase Connection**: project URL, live record counts, connection health check.
+8. **Data Management**: Two sub-actions separated by a divider:
+   - **Reset Demo Data** — inline confirm banner; wipes all data and loads 3 months of realistic demo entries (April–June 2026). Seeds `projected_monthly_income = $4,000`.
+   - **Wipe All Data** — red button opens a modal overlay; calls `POST /api/wipe-data` which deletes all user data but preserves system overtime tiers (sort_order ≤ 3). On success: toast + page reload.
+
+9. **Supabase Connection**: project URL, live record counts, connection health check.
 
 ---
 
@@ -124,7 +128,9 @@ Default demo categories:
 
 **`expenses`**: id, description, merchant, amount, date, payment_method (text, stores nickname), category (text), notes, created_at
 
-**`income`**: id, source, paycheck_date, gross_amount, taxes_withheld, net_amount, hours_worked, hourly_rate, notes, created_at
+**`income`**: id, source (text, display fallback), income_source_id (→ income_sources, nullable), paycheck_date, gross_amount, taxes_withheld, net_amount, hours_worked, hourly_rate, notes, created_at
+
+**`income_sources`**: id, name, hourly_rate (nullable), is_default, is_active, created_at
 
 **`budget_targets`**: id, category, monthly_target, is_recurring, category_type (`'fixed'|'variable_monthly'|'variable_daily'`, CHECK constraint), created_at
 
@@ -154,7 +160,9 @@ Default demo categories:
 
 **`GET /api/cron/payment-reminders`** — Vercel cron job, runs daily at 8:00 AM (configured in `vercel.json`). Requires `Authorization: Bearer <CRON_SECRET>` header. Proxies to a Supabase Edge Function (`send-payment-reminders`) which sends payment reminder emails based on `payment_methods.payment_due_date` and `statement_close_date`.
 
-**`POST /api/reset-demo`** — Wipes all user data (all tables including `recurring_expenses`, `income_hours_breakdown`, `app_settings` projected income gets reset to $4,000) and reloads the demo dataset (April–June 2026). Called by the Settings → Demo Data button.
+**`POST /api/reset-demo`** — Wipes all user data (all tables including `recurring_expenses`, `income_hours_breakdown`, `app_settings` projected income gets reset to $4,000) and reloads the demo dataset (April–June 2026). Called by the Settings → Data Management → Reset Demo Data button.
+
+**`POST /api/wipe-data`** — Deletes all user data in FK-safe order (income_hours_breakdown → savings_contributions → savings_goal_contributions → recurring_expenses → expenses → income → savings_goals → savings_accounts → income_sources → budget_targets → payment_methods → app_settings → overtime_rules where sort_order > 3). Preserves system overtime tiers. Returns `{ success: true }`. Called by the Settings → Data Management → Wipe All Data button.
 
 ---
 
