@@ -24,17 +24,30 @@ A personal budget tracker I built for myself. It's not a SaaS product — just a
 
 ## What's already built
 
+### Navigation
+
+Three top-level sections with a context-sensitive sub-tab row beneath:
+
+- **Add** — active when on `/`. Sub-tabs: Expense | Income | Savings (switch via `?tab=` URL param)
+- **Ledger** — active on `/expenses`, `/income`, `/savings`. Sub-tabs: Expenses | Paychecks | Savings
+- **Insights** — links to `/budget`
+- **Settings gear** (far right, always visible) — links to `/settings`
+
 ### Pages
 
-**Add Expense (`/`)** — Home page. Quick form to log an expense: description, merchant, amount, date, payment method (dropdown — user-managed cards appear under "Cards" optgroup, with static fallbacks: Cash, Credit Card, Debit Card, Venmo, Zelle, Check, Other), category (chip picker), notes. Press `/` from anywhere on the page to jump focus to the description field. Shows 5 most recent expenses below.
+**Add (`/`)** — Tab-driven home page via `?tab=expense|income|savings` URL param (default: expense).
 
-Recurring expense support: a "Recurring expense" checkbox expands a panel to configure type (subscription / utility), frequency (monthly / weekly / biweekly / yearly), and the appropriate day picker (day of month, day of week, or month + day for yearly). The current expense is logged immediately; a record is also inserted into `recurring_expenses` with the schedule. On every page load, `/api/process-recurring` is called to auto-generate any overdue occurrences since the last visit, showing a toast if new rows were added.
+- **Expense tab** — Full expense form: description, merchant, amount, date, payment method (dropdown — user-managed cards under "Cards" optgroup, static fallbacks: Cash, Credit Card, Debit Card, Venmo, Zelle, Check, Other), category (chip picker), notes. Press `/` from anywhere to focus the description field. Shows 5 most recent expenses below the form. On page load calls `/api/process-recurring` to auto-generate overdue recurring entries (toast if new rows added). Recurring expense checkbox expands a panel: type (subscription / utility), frequency (monthly / weekly / biweekly / yearly), day picker. Current expense logs immediately; a `recurring_expenses` row is inserted for future auto-generation.
+
+- **Income tab** — Full paycheck form: source (required), paycheck date (required), hourly rate (optional — entering it reveals a per-tier breakdown table if overtime rules exist), gross amount (auto-calculated from breakdown or manual override), taxes withheld, net amount (auto-calculated from gross − taxes, overridable), notes. Saves to `income` table; if breakdown was filled, also saves rows to `income_hours_breakdown`.
+
+- **Savings tab** — Contribution form: Account or Goal type picker (segmented button), dropdown of active accounts/goals (loaded from DB), amount (required), date (required), notes. Saves to `savings_contributions` or `savings_goal_contributions` based on selection.
 
 **All Expenses (`/expenses`)** — Paginated table (25/page) of every expense. Debounced search, multi-select category + payment method filters, date range picker, sortable columns, inline edit modal, inline delete, running total for filtered view, CSV export. Category column shows colored `CategoryBadge`.
 
-**Income (`/income`)** — Log a paycheck: source, date, hourly rate, taxes withheld, net (auto-calculated but overridable). Overtime-aware: if overtime rules exist, a breakdown table appears showing each pay tier (Regular / Overtime / Double Time / custom) with hours input and subtotal — gross auto-calculates from the tier breakdown. History table is expandable per row to show tier breakdown. Monthly summary cards: Gross / Taxes / Net / Effective Tax Rate. Full history table with edit + delete. Has **month picker** to view any past month.
+**Paychecks (`/income`)** — History-only Ledger view. Month picker at top. Monthly summary cards: Gross / Taxes / Net / Effective Tax Rate. Full history table with edit + delete; each row is expandable to show overtime tier breakdown. No add form — income is logged from Add > Income tab.
 
-**Savings (`/savings`)** — Track savings contributions to accounts and goal buckets. Month picker at top. Two summary cards (this month total, all-time total). **Accounts section**: each active account shows total balance, this month's contributions, expandable monthly contribution history, "+ Add" button opens a contribute modal, each contribution row has Edit + Delete. **Goals section**: each active goal shows name, target amount, progress bar (purple fill → green when complete), "Complete!" badge, expandable monthly history, "+ Add" button, each contribution row has Edit + Delete. Contribute modal works for both account and goal contributions and supports editing existing entries.
+**Savings (`/savings`)** — History-only Ledger view. Month picker at top. Two summary cards (this month total, all-time total). **Accounts section**: each active account shows total balance, this month's contributions, expandable monthly contribution history, each contribution row has Edit + Delete. **Goals section**: each active goal shows name, target amount, progress bar (purple fill → green when complete), "Complete!" badge, expandable monthly history, each contribution row has Edit + Delete. No "+ Add" buttons — contributions are logged from Add > Savings tab. Edit/delete of existing contributions still uses the ContributeModal.
 
 **Budget Overview (`/budget`)** — Has **month picker** to view any past month. Five sections:
 
@@ -103,7 +116,7 @@ Default demo categories:
 - Per-category colored `CategoryBadge` component (icon circle + pill label)
 - `CategoryPicker` chip grid replacing native `<select>` everywhere
 - `MonthPicker` component: `← Month Year →` navigator, disabled past current month, "Today" snap-back button
-- Navigation: 5 tabs (Add Expense, Expenses, Income, Savings, Budget) + Settings gear
+- Navigation: 3 top-level sections (Add / Ledger / Insights) with context-sensitive sub-tab row + Settings gear. Sub-tabs for Add: Expense | Income | Savings. Sub-tabs for Ledger: Expenses | Paychecks | Savings.
 
 ---
 
