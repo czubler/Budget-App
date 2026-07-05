@@ -28,14 +28,14 @@ A personal budget tracker I built for myself. It's not a SaaS product — just a
 
 Three top-level sections with a context-sensitive sub-tab row beneath:
 
-- **Add** — active when on `/`. Sub-tabs: Expense | Income | Savings (switch via `?tab=` URL param)
+- **Log** — active when on `/`. Sub-tabs: Expense | Income | Savings (switch via `?tab=` URL param)
 - **Ledger** — active on `/expenses`, `/income`, `/savings`. Sub-tabs: Expenses | Paychecks | Savings
 - **Insights** — links to `/budget`
 - **Settings gear** (far right, always visible) — links to `/settings`
 
 ### Pages
 
-**Add (`/`)** — Tab-driven home page via `?tab=expense|income|savings` URL param (default: expense).
+**Log (`/`)** — Tab-driven home page via `?tab=expense|income|savings` URL param (default: expense).
 
 - **Expense tab** — Full expense form: description, merchant, amount, date, payment method (dropdown — user-managed cards under "Cards" optgroup, static fallbacks: Cash, Credit Card, Debit Card, Venmo, Zelle, Check, Other), category (chip picker), notes. Press `/` from anywhere to focus the description field. Shows 5 most recent expenses below the form. On page load calls `/api/process-recurring` to auto-generate overdue recurring entries (toast if new rows added). Recurring expense checkbox expands a panel: type (subscription / utility), frequency (monthly / weekly / biweekly / yearly), day picker. Current expense logs immediately; a `recurring_expenses` row is inserted for future auto-generation.
 
@@ -45,9 +45,9 @@ Three top-level sections with a context-sensitive sub-tab row beneath:
 
 **All Expenses (`/expenses`)** — Paginated table (25/page) of every expense. Debounced search, multi-select category + payment method filters, date range picker, sortable columns, inline edit modal, inline delete, running total for filtered view, CSV export. Category column shows colored `CategoryBadge`.
 
-**Paychecks (`/income`)** — History-only Ledger view. Month picker at top. Monthly summary cards: Gross / Taxes / Net / Effective Tax Rate. Full history table with edit + delete; each row is expandable to show overtime tier breakdown. No add form — income is logged from Add > Income tab.
+**Paychecks (`/income`)** — History-only Ledger view. Month picker at top. Monthly summary cards: Gross / Taxes / Net / Effective Tax Rate. Full history table with edit + delete; each row is expandable to show overtime tier breakdown. No add form — income is logged from Log > Income tab.
 
-**Savings (`/savings`)** — History-only Ledger view. Month picker at top. Two summary cards (this month total, all-time total). **Accounts section**: each active account shows total balance, this month's contributions, expandable monthly contribution history, each contribution row has Edit + Delete. **Goals section**: each active goal shows name, target amount, progress bar (purple fill → green when complete), "Complete!" badge, expandable monthly history, each contribution row has Edit + Delete. No "+ Add" buttons — contributions are logged from Add > Savings tab. Edit/delete of existing contributions still uses the ContributeModal.
+**Savings (`/savings`)** — History-only Ledger view. Month picker at top. Two summary cards (this month total, all-time total). **Accounts section**: each active account shows total balance, this month's contributions, expandable monthly contribution history, each contribution row has Edit + Delete. **Goals section**: each active goal shows name, target amount, progress bar (purple fill → green when complete), "Complete!" badge, expandable monthly history, each contribution row has Edit + Delete. No "+ Add" buttons — contributions are logged from Log > Savings tab. Edit/delete of existing contributions still uses the ContributeModal.
 
 **Budget Overview (`/budget`)** — Has **month picker** to view any past month. Five sections:
 
@@ -116,7 +116,7 @@ Default demo categories:
 - Per-category colored `CategoryBadge` component (icon circle + pill label)
 - `CategoryPicker` chip grid replacing native `<select>` everywhere
 - `MonthPicker` component: `← Month Year →` navigator, disabled past current month, "Today" snap-back button
-- Navigation: 3 top-level sections (Add / Ledger / Insights) with context-sensitive sub-tab row + Settings gear. Sub-tabs for Add: Expense | Income | Savings. Sub-tabs for Ledger: Expenses | Paychecks | Savings.
+- Navigation: 3 top-level sections (Log / Ledger / Insights) with context-sensitive sub-tab row + Settings gear. Sub-tabs for Log: Expense | Income | Savings. Sub-tabs for Ledger: Expenses | Paychecks | Savings.
 
 ---
 

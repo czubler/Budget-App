@@ -86,7 +86,7 @@ export default function Navigation() {
           </span>
 
           <div className="flex items-stretch">
-            <SectionTab href="/" label="Add" active={section === 'add'} />
+            <SectionTab href="/" label="Log" active={section === 'add'} />
             <SectionTab href="/expenses" label="Ledger" active={section === 'ledger'} />
             <SectionTab href="/budget" label="Insights" active={section === 'insights'} />
           </div>
