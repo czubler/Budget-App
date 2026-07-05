@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
-import type { Expense } from '@/lib/types'
+import type { Expense, OvertimeRule } from '@/lib/types'
 import { useCategories } from '@/lib/useCategories'
 import { usePaymentMethods } from '@/lib/usePaymentMethods'
 import { CategoryPicker } from '@/components/CategoryPicker'
@@ -29,6 +29,59 @@ function formatDate(dateStr: string) {
 
 const inputCls =
   'w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white'
+
+const dollarFieldCls =
+  'w-full pl-7 pr-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white'
+
+function DollarInput({
+  value,
+  onChange,
+  placeholder = '0.00',
+  required: req = false,
+  highlighted = false,
+}: {
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+  required?: boolean
+  highlighted?: boolean
+}) {
+  return (
+    <div className="relative">
+      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm select-none">$</span>
+      <input
+        type="number"
+        min="0"
+        step="0.01"
+        required={req}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className={`${dollarFieldCls} ${highlighted ? 'bg-indigo-50 border-indigo-200' : ''}`}
+      />
+    </div>
+  )
+}
+
+function calcBreakdownGross(
+  baseRate: string,
+  breakdown: Array<{ ruleId: string; hours: string }>,
+  rules: OvertimeRule[]
+): number {
+  const rate = parseFloat(baseRate) || 0
+  return breakdown.reduce((sum, b) => {
+    const rule = rules.find((r) => r.id === b.ruleId)
+    const mult = rule ? Number(rule.multiplier) : 1
+    const hrs = parseFloat(b.hours) || 0
+    return sum + rate * mult * hrs
+  }, 0)
+}
+
+function computeNet(gross: string, taxes: string): string {
+  const g = parseFloat(gross) || 0
+  const t = parseFloat(taxes) || 0
+  return g > 0 && g - t >= 0 ? (g - t).toFixed(2) : ''
+}
 
 type RecurringFrequency = 'monthly' | 'weekly' | 'biweekly' | 'yearly'
 type RecurringType = 'subscription' | 'utility'
@@ -479,125 +532,283 @@ function AddExpenseForm() {
   )
 }
 
-// ─── Add Income Form (condensed) ──────────────────────────────────────────────
+// ─── Add Income Form (full — with overtime tier support) ─────────────────────
 
 function AddIncomeForm() {
   const [form, setForm] = useState({
     source: '',
     paycheck_date: todayString(),
+    hourly_rate: '',
     gross_amount: '',
     taxes_withheld: '',
     net_amount: '',
     notes: '',
   })
+  const [netEdited, setNetEdited] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [overtimeRules, setOvertimeRules] = useState<OvertimeRule[]>([])
+  const [breakdown, setBreakdown] = useState<Array<{ ruleId: string; hours: string }>>([])
+  const [grossLocked, setGrossLocked] = useState(false)
   const sourceRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => { sourceRef.current?.focus() }, [])
+  useEffect(() => {
+    sourceRef.current?.focus()
+    loadOvertimeRules()
+  }, [])
 
-  function handleAmountChange(field: 'gross_amount' | 'taxes_withheld', value: string) {
-    const next = { ...form, [field]: value }
-    const gross = parseFloat(next.gross_amount) || 0
-    const taxes = parseFloat(next.taxes_withheld) || 0
-    setForm({ ...next, net_amount: gross > 0 ? (gross - taxes).toFixed(2) : '' })
+  async function loadOvertimeRules() {
+    const { data } = await supabase
+      .from('overtime_rules')
+      .select('id, label, multiplier, sort_order, created_at')
+      .order('sort_order')
+    const rules: OvertimeRule[] = (data ?? []).map((r) => ({
+      id: r.id,
+      label: r.label,
+      multiplier: Number(r.multiplier),
+      sort_order: r.sort_order,
+      created_at: r.created_at ?? '',
+    }))
+    setOvertimeRules(rules)
+    setBreakdown(rules.map((r) => ({ ruleId: r.id, hours: '' })))
+  }
+
+  function handleRateChange(v: string) {
+    const gross = calcBreakdownGross(v, breakdown, overtimeRules)
+    setForm((f) => {
+      const newGross = !grossLocked && gross > 0 ? gross.toFixed(2) : grossLocked ? f.gross_amount : ''
+      return {
+        ...f,
+        hourly_rate: v,
+        gross_amount: newGross,
+        net_amount: !netEdited ? computeNet(newGross, f.taxes_withheld) : f.net_amount,
+      }
+    })
+  }
+
+  function handleBreakdownChange(ruleId: string, hours: string) {
+    const newBreakdown = breakdown.map((b) => (b.ruleId === ruleId ? { ...b, hours } : b))
+    setBreakdown(newBreakdown)
+    if (!grossLocked) {
+      const gross = calcBreakdownGross(form.hourly_rate, newBreakdown, overtimeRules)
+      setForm((f) => {
+        const newGross = gross > 0 ? gross.toFixed(2) : ''
+        return {
+          ...f,
+          gross_amount: newGross,
+          net_amount: !netEdited ? computeNet(newGross, f.taxes_withheld) : f.net_amount,
+        }
+      })
+    }
+  }
+
+  function handleGrossManual(v: string) {
+    setGrossLocked(true)
+    setForm((f) => ({ ...f, gross_amount: v, net_amount: !netEdited ? computeNet(v, f.taxes_withheld) : f.net_amount }))
+  }
+
+  function handleTaxesChange(v: string) {
+    setForm((f) => ({ ...f, taxes_withheld: v, net_amount: !netEdited ? computeNet(f.gross_amount, v) : f.net_amount }))
+  }
+
+  function handleNetChange(v: string) {
+    setNetEdited(true)
+    setForm((f) => ({ ...f, net_amount: v }))
+  }
+
+  function unlockGross() {
+    setGrossLocked(false)
+    const gross = calcBreakdownGross(form.hourly_rate, breakdown, overtimeRules)
+    setForm((f) => ({ ...f, gross_amount: gross > 0 ? gross.toFixed(2) : '' }))
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    const net = parseFloat(form.net_amount)
-    if (!net || net <= 0) { toast.error('Enter a net amount'); return }
     setSubmitting(true)
-    const { error } = await supabase.from('income').insert({
-      source: form.source || null,
-      paycheck_date: form.paycheck_date,
-      gross_amount: parseFloat(form.gross_amount) || null,
-      taxes_withheld: parseFloat(form.taxes_withheld) || null,
-      net_amount: net,
-      notes: form.notes || null,
-    })
+    const filledBreakdown = breakdown.filter((b) => parseFloat(b.hours) > 0)
+    const totalHours = filledBreakdown.reduce((sum, b) => sum + (parseFloat(b.hours) || 0), 0)
+    const { data: incomeData, error } = await supabase
+      .from('income')
+      .insert({
+        source: form.source,
+        paycheck_date: form.paycheck_date,
+        hours_worked: totalHours > 0 ? totalHours : null,
+        hourly_rate: form.hourly_rate ? parseFloat(form.hourly_rate) : null,
+        gross_amount: parseFloat(form.gross_amount),
+        taxes_withheld: form.taxes_withheld ? parseFloat(form.taxes_withheld) : null,
+        net_amount: form.net_amount ? parseFloat(form.net_amount) : null,
+        notes: form.notes || null,
+      })
+      .select()
+      .single()
+    if (error) { toast.error('Failed to save income'); setSubmitting(false); return }
+
+    if (filledBreakdown.length > 0 && form.hourly_rate && incomeData) {
+      const baseRate = parseFloat(form.hourly_rate)
+      const rows = filledBreakdown.map((b) => {
+        const rule = overtimeRules.find((r) => r.id === b.ruleId)!
+        const hrs = parseFloat(b.hours)
+        const mult = Number(rule.multiplier)
+        return {
+          income_id: incomeData.id,
+          rule_id: b.ruleId,
+          label: rule.label,
+          multiplier: mult,
+          hours_worked: hrs,
+          base_rate: baseRate,
+          subtotal: parseFloat((baseRate * mult * hrs).toFixed(2)),
+        }
+      })
+      const { error: bErr } = await supabase.from('income_hours_breakdown').insert(rows)
+      if (bErr) toast.error('Income saved, but breakdown failed to save')
+    }
+
     setSubmitting(false)
-    if (error) { toast.error('Failed to save'); return }
     toast.success('Income logged!')
-    setForm({ source: '', paycheck_date: todayString(), gross_amount: '', taxes_withheld: '', net_amount: '', notes: '' })
+    setForm({ source: '', paycheck_date: todayString(), hourly_rate: '', gross_amount: '', taxes_withheld: '', net_amount: '', notes: '' })
+    setNetEdited(false)
+    setGrossLocked(false)
+    setBreakdown(overtimeRules.map((r) => ({ ruleId: r.id, hours: '' })))
     sourceRef.current?.focus()
   }
 
+  const showBreakdownTable = overtimeRules.length > 0 && !!form.hourly_rate
+
   return (
     <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Source</label>
-          <input
-            ref={sourceRef}
-            type="text"
-            value={form.source}
-            onChange={(e) => setForm({ ...form, source: e.target.value })}
-            placeholder="e.g. Employer name"
-            className={inputCls}
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">
-            Date <span className="text-red-400">*</span>
-          </label>
-          <input
-            required
-            type="date"
-            value={form.paycheck_date}
-            onChange={(e) => setForm({ ...form, paycheck_date: e.target.value })}
-            className={inputCls}
-          />
-        </div>
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1">
+          Source <span className="text-red-400">*</span>
+        </label>
+        <input
+          ref={sourceRef}
+          required
+          type="text"
+          value={form.source}
+          onChange={(e) => setForm({ ...form, source: e.target.value })}
+          placeholder="Main Job, Freelance, Side Project…"
+          className={inputCls}
+        />
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Gross</label>
-          <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm select-none">$</span>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={form.gross_amount}
-              onChange={(e) => handleAmountChange('gross_amount', e.target.value)}
-              placeholder="0.00"
-              className={`${inputCls} pl-7`}
-            />
-          </div>
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1">
+          Paycheck Date <span className="text-red-400">*</span>
+        </label>
+        <input
+          required
+          type="date"
+          value={form.paycheck_date}
+          onChange={(e) => setForm({ ...form, paycheck_date: e.target.value })}
+          className={inputCls}
+        />
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1">Hourly Rate</label>
+        <DollarInput
+          value={form.hourly_rate}
+          onChange={handleRateChange}
+          placeholder="Optional — enter to use breakdown table"
+        />
+      </div>
+
+      {showBreakdownTable && (
+        <div className="rounded-lg border border-indigo-100 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-indigo-50">
+              <tr>
+                <th className="px-3 py-2 text-left text-xs font-semibold text-indigo-600">Tier</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-indigo-600">Effective Rate</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-indigo-600">Hours</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-indigo-600">Subtotal</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-indigo-50">
+              {breakdown.map((b) => {
+                const rule = overtimeRules.find((r) => r.id === b.ruleId)
+                const mult = rule ? Number(rule.multiplier) : 1
+                const effectiveRate = (parseFloat(form.hourly_rate) || 0) * mult
+                const hrs = parseFloat(b.hours) || 0
+                const subtotal = effectiveRate * hrs
+                return (
+                  <tr key={b.ruleId} className="bg-white">
+                    <td className="px-3 py-2 text-slate-700 font-medium">{rule?.label}</td>
+                    <td className="px-3 py-2 text-right text-slate-500 text-xs whitespace-nowrap">
+                      ${effectiveRate.toFixed(2)}/hr
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        value={b.hours}
+                        onChange={(e) => handleBreakdownChange(b.ruleId, e.target.value)}
+                        placeholder="0"
+                        className="w-20 px-2 py-1 border border-slate-300 rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-right font-semibold text-slate-700 whitespace-nowrap">
+                      {subtotal > 0 ? `$${subtotal.toFixed(2)}` : <span className="text-slate-300">—</span>}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+            <tfoot>
+              <tr className="bg-indigo-50">
+                <td colSpan={3} className="px-3 py-2 text-right text-xs font-semibold text-indigo-600">Total</td>
+                <td className="px-3 py-2 text-right font-bold text-indigo-700">
+                  ${calcBreakdownGross(form.hourly_rate, breakdown, overtimeRules).toFixed(2)}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
         </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Taxes</label>
-          <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm select-none">$</span>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={form.taxes_withheld}
-              onChange={(e) => handleAmountChange('taxes_withheld', e.target.value)}
-              placeholder="0.00"
-              className={`${inputCls} pl-7`}
-            />
-          </div>
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">
-            Net <span className="text-red-400">*</span>
+      )}
+
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <label className="text-sm font-medium text-slate-700">
+            Gross Amount <span className="text-red-400">*</span>
           </label>
-          <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm select-none">$</span>
-            <input
-              required
-              type="number"
-              min="0"
-              step="0.01"
-              value={form.net_amount}
-              onChange={(e) => setForm({ ...form, net_amount: e.target.value })}
-              placeholder="0.00"
-              className={`${inputCls} pl-7`}
-            />
+          {grossLocked && showBreakdownTable && (
+            <button
+              type="button"
+              onClick={unlockGross}
+              className="text-xs text-indigo-500 hover:text-indigo-700 font-medium transition-colors"
+            >
+              ↺ Use breakdown total
+            </button>
+          )}
+          {!grossLocked && showBreakdownTable && form.gross_amount && (
+            <span className="text-xs text-indigo-400">auto-calculated</span>
+          )}
+        </div>
+        <DollarInput
+          value={form.gross_amount}
+          onChange={handleGrossManual}
+          required
+          highlighted={!grossLocked && !!form.gross_amount && showBreakdownTable}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Taxes Withheld</label>
+          <DollarInput value={form.taxes_withheld} onChange={handleTaxesChange} placeholder="0.00" />
+        </div>
+        <div>
+          <div className="flex items-center gap-1.5 mb-1">
+            <label className="text-sm font-medium text-slate-700">Net Amount</label>
+            {!netEdited && form.net_amount && (
+              <span className="text-xs font-normal text-indigo-500">auto-calculated</span>
+            )}
           </div>
+          <DollarInput
+            value={form.net_amount}
+            onChange={handleNetChange}
+            highlighted={!netEdited && !!form.net_amount}
+          />
         </div>
       </div>
 
@@ -608,16 +819,11 @@ function AddIncomeForm() {
         <textarea
           value={form.notes}
           onChange={(e) => setForm({ ...form, notes: e.target.value })}
-          placeholder="Any extra details..."
           rows={2}
+          placeholder="Any extra details…"
           className={`${inputCls} resize-none`}
         />
       </div>
-
-      <p className="text-xs text-slate-400">
-        For overtime tier breakdowns, use the full{' '}
-        <Link href="/income" className="underline hover:text-slate-600">Paychecks</Link> page.
-      </p>
 
       <button
         type="submit"

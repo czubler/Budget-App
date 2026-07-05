@@ -165,7 +165,6 @@ function AccountCard({
   monthSaved,
   recentContribs,
   monthLabel,
-  onContribute,
   onEditContrib,
   onDeleteContrib,
 }: {
@@ -174,7 +173,6 @@ function AccountCard({
   monthSaved: number
   recentContribs: SavingsContribution[]
   monthLabel: string
-  onContribute: () => void
   onEditContrib: (c: SavingsContribution) => void
   onDeleteContrib: (id: string) => Promise<void>
 }) {
@@ -203,14 +201,6 @@ function AccountCard({
           <p className="text-lg font-bold text-emerald-600">{monthSaved > 0 ? usd(monthSaved) : '—'}</p>
           <p className="text-xs text-slate-400">this month</p>
         </div>
-        <button
-          onClick={onContribute}
-          className="shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors"
-          style={{ backgroundColor: '#7F77DD' }}
-        >
-          <i className="ti ti-plus" style={{ fontSize: 12 }} />
-          Add
-        </button>
       </div>
 
       {recentContribs.length > 0 && (
@@ -284,7 +274,6 @@ function GoalCard({
   monthSaved,
   recentContribs,
   monthLabel,
-  onContribute,
   onEditContrib,
   onDeleteContrib,
 }: {
@@ -293,7 +282,6 @@ function GoalCard({
   monthSaved: number
   recentContribs: SavingsGoalContribution[]
   monthLabel: string
-  onContribute: () => void
   onEditContrib: (c: SavingsGoalContribution) => void
   onDeleteContrib: (id: string) => Promise<void>
 }) {
@@ -335,18 +323,10 @@ function GoalCard({
             </div>
             <p className="text-xs text-slate-400 mt-0.5">Target: {usd(goal.target_amount)}</p>
           </div>
-          <div className="text-right shrink-0 mr-2">
+          <div className="text-right shrink-0">
             <p className="text-sm font-bold text-emerald-600">{monthSaved > 0 ? usd(monthSaved) : '—'}</p>
             <p className="text-xs text-slate-400">this month</p>
           </div>
-          <button
-            onClick={onContribute}
-            className="shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors"
-            style={{ backgroundColor: '#7F77DD' }}
-          >
-            <i className="ti ti-plus" style={{ fontSize: 12 }} />
-            Add
-          </button>
         </div>
 
         <div className="space-y-1.5">
@@ -444,7 +424,6 @@ export default function SavingsPage() {
   const [monthGoalContribs, setMonthGoalContribs] = useState<SavingsGoalContribution[]>([])
   const [loading, setLoading] = useState(true)
   const [monthLabel, setMonthLabel] = useState('')
-  const [modal, setModal] = useState<ModalTarget | null>(null)
   const [editModal, setEditModal] = useState<{ target: ModalTarget; contrib: EditingContrib } | null>(null)
 
   useEffect(() => {
@@ -583,7 +562,6 @@ export default function SavingsPage() {
                 monthSaved={accountMonthTotal(acct.id)}
                 recentContribs={accountMonthList(acct.id)}
                 monthLabel={monthLabel}
-                onContribute={() => setModal({ type: 'account', id: acct.id, name: acct.name })}
                 onEditContrib={(c) =>
                   setEditModal({
                     target: { type: 'account', id: acct.id, name: acct.name },
@@ -618,7 +596,6 @@ export default function SavingsPage() {
                 monthSaved={goalMonthTotal(goal.id)}
                 recentContribs={goalMonthList(goal.id)}
                 monthLabel={monthLabel}
-                onContribute={() => setModal({ type: 'goal', id: goal.id, name: goal.name })}
                 onEditContrib={(c) =>
                   setEditModal({
                     target: { type: 'goal', id: goal.id, name: goal.name },
@@ -631,14 +608,6 @@ export default function SavingsPage() {
           </div>
         )}
       </div>
-
-      {modal && (
-        <ContributeModal
-          target={modal}
-          onClose={() => setModal(null)}
-          onSaved={() => fetchAll(selectedMonth.year, selectedMonth.month)}
-        />
-      )}
 
       {editModal && (
         <ContributeModal
