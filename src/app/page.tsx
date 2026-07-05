@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
-import type { Expense, OvertimeRule } from '@/lib/types'
+import type { Expense, OvertimeRule, IncomeSource } from '@/lib/types'
 import { useCategories } from '@/lib/useCategories'
 import { usePaymentMethods } from '@/lib/usePaymentMethods'
 import { CategoryPicker } from '@/components/CategoryPicker'
@@ -537,6 +537,7 @@ function AddExpenseForm() {
 function AddIncomeForm() {
   const [form, setForm] = useState({
     source: '',
+    income_source_id: '',
     paycheck_date: todayString(),
     hourly_rate: '',
     gross_amount: '',
@@ -549,19 +550,20 @@ function AddIncomeForm() {
   const [overtimeRules, setOvertimeRules] = useState<OvertimeRule[]>([])
   const [breakdown, setBreakdown] = useState<Array<{ ruleId: string; hours: string }>>([])
   const [grossLocked, setGrossLocked] = useState(false)
-  const sourceRef = useRef<HTMLInputElement>(null)
+  const [incomeSources, setIncomeSources] = useState<IncomeSource[]>([])
+  const [sourcesLoaded, setSourcesLoaded] = useState(false)
+  const firstFieldRef = useRef<HTMLSelectElement | HTMLInputElement | null>(null)
 
   useEffect(() => {
-    sourceRef.current?.focus()
-    loadOvertimeRules()
+    loadData()
   }, [])
 
-  async function loadOvertimeRules() {
-    const { data } = await supabase
-      .from('overtime_rules')
-      .select('id, label, multiplier, sort_order, created_at')
-      .order('sort_order')
-    const rules: OvertimeRule[] = (data ?? []).map((r) => ({
+  async function loadData() {
+    const [rulesResult, sourcesResult] = await Promise.all([
+      supabase.from('overtime_rules').select('id, label, multiplier, sort_order, created_at').order('sort_order'),
+      supabase.from('income_sources').select('id, name, hourly_rate, is_default, is_active, created_at').eq('is_active', true).order('name'),
+    ])
+    const rules: OvertimeRule[] = (rulesResult.data ?? []).map((r) => ({
       id: r.id,
       label: r.label,
       multiplier: Number(r.multiplier),
@@ -570,6 +572,27 @@ function AddIncomeForm() {
     }))
     setOvertimeRules(rules)
     setBreakdown(rules.map((r) => ({ ruleId: r.id, hours: '' })))
+
+    const sources: IncomeSource[] = (sourcesResult.data ?? []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      hourly_rate: s.hourly_rate != null ? Number(s.hourly_rate) : null,
+      is_default: s.is_default,
+      is_active: s.is_active,
+      created_at: s.created_at ?? '',
+    }))
+    setIncomeSources(sources)
+    setSourcesLoaded(true)
+
+    const defaultSource = sources.find((s) => s.is_default)
+    if (defaultSource) {
+      setForm((f) => ({
+        ...f,
+        income_source_id: defaultSource.id,
+        source: defaultSource.name,
+        hourly_rate: defaultSource.hourly_rate != null ? String(defaultSource.hourly_rate) : '',
+      }))
+    }
   }
 
   function handleRateChange(v: string) {
@@ -621,6 +644,24 @@ function AddIncomeForm() {
     setForm((f) => ({ ...f, gross_amount: gross > 0 ? gross.toFixed(2) : '' }))
   }
 
+  function handleSourceSelect(sourceId: string) {
+    const source = incomeSources.find((s) => s.id === sourceId)
+    if (!source) {
+      setForm((f) => ({ ...f, income_source_id: '', source: '' }))
+      return
+    }
+    const rate = source.hourly_rate != null ? String(source.hourly_rate) : ''
+    const gross = rate ? calcBreakdownGross(rate, breakdown, overtimeRules) : 0
+    setForm((f) => ({
+      ...f,
+      income_source_id: source.id,
+      source: source.name,
+      hourly_rate: rate,
+      gross_amount: !grossLocked && gross > 0 ? gross.toFixed(2) : f.gross_amount,
+      net_amount: !netEdited ? computeNet(!grossLocked && gross > 0 ? gross.toFixed(2) : f.gross_amount, f.taxes_withheld) : f.net_amount,
+    }))
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSubmitting(true)
@@ -630,6 +671,7 @@ function AddIncomeForm() {
       .from('income')
       .insert({
         source: form.source,
+        income_source_id: form.income_source_id || null,
         paycheck_date: form.paycheck_date,
         hours_worked: totalHours > 0 ? totalHours : null,
         hourly_rate: form.hourly_rate ? parseFloat(form.hourly_rate) : null,
@@ -664,11 +706,20 @@ function AddIncomeForm() {
 
     setSubmitting(false)
     toast.success('Income logged!')
-    setForm({ source: '', paycheck_date: todayString(), hourly_rate: '', gross_amount: '', taxes_withheld: '', net_amount: '', notes: '' })
+    const defaultSource = incomeSources.find((s) => s.is_default)
+    setForm({
+      source: defaultSource?.name ?? '',
+      income_source_id: defaultSource?.id ?? '',
+      paycheck_date: todayString(),
+      hourly_rate: defaultSource?.hourly_rate != null ? String(defaultSource.hourly_rate) : '',
+      gross_amount: '',
+      taxes_withheld: '',
+      net_amount: '',
+      notes: '',
+    })
     setNetEdited(false)
     setGrossLocked(false)
     setBreakdown(overtimeRules.map((r) => ({ ruleId: r.id, hours: '' })))
-    sourceRef.current?.focus()
   }
 
   const showBreakdownTable = overtimeRules.length > 0 && !!form.hourly_rate
@@ -679,15 +730,36 @@ function AddIncomeForm() {
         <label className="block text-sm font-medium text-slate-700 mb-1">
           Source <span className="text-red-400">*</span>
         </label>
-        <input
-          ref={sourceRef}
-          required
-          type="text"
-          value={form.source}
-          onChange={(e) => setForm({ ...form, source: e.target.value })}
-          placeholder="Main Job, Freelance, Side Project…"
-          className={inputCls}
-        />
+        {sourcesLoaded && incomeSources.length > 0 ? (
+          <select
+            ref={firstFieldRef as React.RefObject<HTMLSelectElement>}
+            required
+            value={form.income_source_id}
+            onChange={(e) => handleSourceSelect(e.target.value)}
+            className={inputCls}
+          >
+            <option value="">Select a source…</option>
+            {incomeSources.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        ) : (
+          <input
+            ref={firstFieldRef as React.RefObject<HTMLInputElement>}
+            required
+            type="text"
+            value={form.source}
+            onChange={(e) => setForm({ ...form, source: e.target.value })}
+            placeholder="Main Job, Freelance, Side Project…"
+            className={inputCls}
+          />
+        )}
+        {sourcesLoaded && incomeSources.length === 0 && (
+          <p className="text-xs text-slate-400 mt-1">
+            No sources yet.{' '}
+            <Link href="/settings" className="underline hover:text-slate-600">Add sources in Settings.</Link>
+          </p>
+        )}
       </div>
 
       <div>

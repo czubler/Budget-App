@@ -13,6 +13,7 @@ export type Expense = {
 export type Income = {
   id: string
   source: string
+  income_source_id: string | null
   hours_worked: number | null
   hourly_rate: number | null
   paycheck_date: string
@@ -20,6 +21,15 @@ export type Income = {
   taxes_withheld: number | null
   net_amount: number | null
   notes: string | null
+  created_at: string
+}
+
+export type IncomeSource = {
+  id: string
+  name: string
+  hourly_rate: number | null
+  is_default: boolean
+  is_active: boolean
   created_at: string
 }
 

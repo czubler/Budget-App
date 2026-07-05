@@ -3,7 +3,7 @@
 import { useState, useEffect, Fragment } from 'react'
 import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
-import type { Income, IncomeHoursBreakdown } from '@/lib/types'
+import type { Income, IncomeHoursBreakdown, IncomeSource } from '@/lib/types'
 import { Bone } from '@/components/Skeleton'
 import { MonthPicker, type MonthValue } from '@/components/MonthPicker'
 
@@ -349,29 +349,60 @@ export default function IncomePage() {
   })
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [breakdownCache, setBreakdownCache] = useState<Record<string, IncomeHoursBreakdown[]>>({})
+  const [incomeSources, setIncomeSources] = useState<IncomeSource[]>([])
+  const [sourceFilter, setSourceFilter] = useState<string>('')
 
   useEffect(() => {
     fetchData(selectedMonth.year, selectedMonth.month)
   }, [selectedMonth])
 
+  useEffect(() => {
+    loadSources()
+  }, [])
+
+  useEffect(() => {
+    const { first, last } = monthRange(selectedMonth.year, selectedMonth.month)
+    const monthRows = history.filter((r) => {
+      const inMonth = r.paycheck_date >= first && r.paycheck_date <= last
+      if (!inMonth) return false
+      if (sourceFilter === '') return true
+      if (sourceFilter === 'unassigned') return r.income_source_id == null
+      return r.income_source_id === sourceFilter
+    })
+    const gross = monthRows.reduce((s, r) => s + Number(r.gross_amount), 0)
+    const taxes = monthRows.reduce((s, r) => s + Number(r.taxes_withheld ?? 0), 0)
+    const net = monthRows.reduce((s, r) => s + Number(r.net_amount ?? 0), 0)
+    setSummary({ gross, taxes, net, taxRate: gross > 0 ? (taxes / gross) * 100 : 0 })
+  }, [history, selectedMonth, sourceFilter])
+
+  async function loadSources() {
+    const { data } = await supabase
+      .from('income_sources')
+      .select('id, name, hourly_rate, is_default, is_active, created_at')
+      .eq('is_active', true)
+      .order('name')
+    if (data) {
+      setIncomeSources(data.map((s) => ({
+        id: s.id,
+        name: s.name,
+        hourly_rate: s.hourly_rate != null ? Number(s.hourly_rate) : null,
+        is_default: s.is_default,
+        is_active: s.is_active,
+        created_at: s.created_at ?? '',
+      })))
+    }
+  }
+
   async function fetchData(year: number, month: number) {
     setLoading(true)
     try {
-      const { first, last, label } = monthRange(year, month)
+      const { label } = monthRange(year, month)
       setMonthLabel(label)
-      const [{ data: all }, { data: monthData }] = await Promise.all([
-        supabase.from('income').select('*').order('paycheck_date', { ascending: false }),
-        supabase
-          .from('income')
-          .select('gross_amount, taxes_withheld, net_amount')
-          .gte('paycheck_date', first)
-          .lte('paycheck_date', last),
-      ])
+      const { data: all } = await supabase
+        .from('income')
+        .select('*')
+        .order('paycheck_date', { ascending: false })
       setHistory(all ?? [])
-      const gross = monthData?.reduce((s, r) => s + Number(r.gross_amount), 0) ?? 0
-      const taxes = monthData?.reduce((s, r) => s + Number(r.taxes_withheld ?? 0), 0) ?? 0
-      const net = monthData?.reduce((s, r) => s + Number(r.net_amount ?? 0), 0) ?? 0
-      setSummary({ gross, taxes, net, taxRate: gross > 0 ? (taxes / gross) * 100 : 0 })
     } catch {
       toast.error('Failed to load income data')
     } finally {
@@ -413,6 +444,12 @@ export default function IncomePage() {
       }
     }
   }
+
+  const displayedHistory = history.filter((r) => {
+    if (sourceFilter === '') return true
+    if (sourceFilter === 'unassigned') return r.income_source_id == null
+    return r.income_source_id === sourceFilter
+  })
 
   return (
     <div>
@@ -465,6 +502,24 @@ export default function IncomePage() {
         )}
       </div>
 
+      {/* Source filter */}
+      {incomeSources.length > 0 && (
+        <div className="flex items-center gap-2 mb-5">
+          <label className="text-xs font-medium text-slate-500 shrink-0">Source</label>
+          <select
+            value={sourceFilter}
+            onChange={(e) => setSourceFilter(e.target.value)}
+            className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+          >
+            <option value="">All sources</option>
+            {incomeSources.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+            <option value="unassigned">Unassigned</option>
+          </select>
+        </div>
+      )}
+
       {/* History table */}
       <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">Income History</h2>
 
@@ -493,9 +548,9 @@ export default function IncomePage() {
             </table>
           </div>
         </div>
-      ) : history.length === 0 ? (
+      ) : displayedHistory.length === 0 ? (
         <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-sm text-slate-400">
-          No income logged yet.
+          {sourceFilter ? 'No income entries for this source.' : 'No income logged yet.'}
         </div>
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
@@ -516,7 +571,7 @@ export default function IncomePage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {history.map((entry) => (
+                {displayedHistory.map((entry) => (
                   <Fragment key={entry.id}>
                     <tr className="hover:bg-slate-50 transition-colors">
                       <td className="px-3 py-3 whitespace-nowrap text-xs text-slate-500">

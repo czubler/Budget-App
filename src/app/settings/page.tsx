@@ -11,6 +11,7 @@ type AccountRow = { id: string; name: string; is_active: boolean }
 type GoalRow = { id: string; name: string; target_amount: string; is_archived: boolean }
 type PaymentMethodRow = { id: string; nickname: string; payment_due_date: string; statement_close_date: string; is_active: boolean }
 type OvertimeTierRow = { id: string; label: string; multiplier: string; sort_order: number }
+type IncomeSourceRow = { id: string; name: string; hourly_rate: string; is_default: boolean; is_active: boolean }
 
 function ordinal(n: number) {
   const s = ['th', 'st', 'nd', 'rd']
@@ -168,6 +169,16 @@ export default function SettingsPage() {
   const [editTierLabel, setEditTierLabel] = useState('')
   const [editTierMultiplier, setEditTierMultiplier] = useState('')
 
+  // income sources
+  const [incomeSources, setIncomeSources] = useState<IncomeSourceRow[]>([])
+  const [newSourceName, setNewSourceName] = useState('')
+  const [newSourceRate, setNewSourceRate] = useState('')
+  const [addingSource, setAddingSource] = useState(false)
+  const [sourceDeleteConfirm, setSourceDeleteConfirm] = useState<string | null>(null)
+  const [editingSourceId, setEditingSourceId] = useState<string | null>(null)
+  const [editSourceName, setEditSourceName] = useState('')
+  const [editSourceRate, setEditSourceRate] = useState('')
+
   // projected income
   const [projectedIncome, setProjectedIncome] = useState('')
   const [savingProjectedIncome, setSavingProjectedIncome] = useState(false)
@@ -201,6 +212,7 @@ export default function SettingsPage() {
         { data: pmData, error: pmErr },
         { data: tiersData, error: tiersErr },
         { data: settingsData, error: settingsErr },
+        { data: sourcesData },
       ] = await Promise.all([
         supabase
           .from('budget_targets')
@@ -214,6 +226,7 @@ export default function SettingsPage() {
         supabase.from('payment_methods').select('id, nickname, payment_due_date, statement_close_date, is_active').order('nickname'),
         supabase.from('overtime_rules').select('id, label, multiplier, sort_order').order('sort_order'),
         supabase.from('app_settings').select('key, value'),
+        supabase.from('income_sources').select('id, name, hourly_rate, is_default, is_active').order('name'),
       ])
 
       if (tErr || eErr || iErr || aErr || gErr || pmErr || tiersErr || settingsErr) throw new Error('Query failed')
@@ -249,6 +262,15 @@ export default function SettingsPage() {
           label: t.label,
           multiplier: String(t.multiplier),
           sort_order: t.sort_order,
+        })) ?? []
+      )
+      setIncomeSources(
+        sourcesData?.map((s) => ({
+          id: s.id,
+          name: s.name,
+          hourly_rate: s.hourly_rate != null ? String(s.hourly_rate) : '',
+          is_default: s.is_default,
+          is_active: s.is_active,
         })) ?? []
       )
       setConnStatus('ok')
@@ -326,6 +348,81 @@ export default function SettingsPage() {
 
   function setCategoryType(cat: string, v: 'fixed' | 'variable_monthly' | 'variable_daily') {
     setRows((prev) => prev.map((r) => (r.category === cat ? { ...r, category_type: v } : r)))
+  }
+
+  // ─── Income Sources ────────────────────────────────────────────────────────
+
+  async function addIncomeSource() {
+    const name = newSourceName.trim()
+    if (!name) return
+    const rate = newSourceRate ? parseFloat(newSourceRate) : null
+    setAddingSource(true)
+    const { data, error } = await supabase
+      .from('income_sources')
+      .insert({ name, hourly_rate: rate })
+      .select('id, name, hourly_rate, is_default, is_active')
+      .single()
+    setAddingSource(false)
+    if (error) { toast.error('Failed to add source'); return }
+    setIncomeSources((prev) =>
+      [...prev, { ...data, hourly_rate: data.hourly_rate != null ? String(data.hourly_rate) : '' }]
+        .sort((a, b) => a.name.localeCompare(b.name))
+    )
+    setNewSourceName('')
+    setNewSourceRate('')
+    toast.success(`"${name}" added`)
+  }
+
+  async function saveIncomeSource(id: string) {
+    const name = editSourceName.trim()
+    if (!name) return
+    const rate = editSourceRate ? parseFloat(editSourceRate) : null
+    const { error } = await supabase
+      .from('income_sources')
+      .update({ name, hourly_rate: rate })
+      .eq('id', id)
+    if (error) { toast.error('Failed to update'); return }
+    setIncomeSources((prev) =>
+      prev.map((s) => s.id === id ? { ...s, name, hourly_rate: editSourceRate } : s)
+    )
+    setEditingSourceId(null)
+    toast.success('Source updated')
+  }
+
+  async function setDefaultSource(id: string) {
+    const { error } = await supabase.rpc('set_default_income_source', { source_id: id })
+    if (error) {
+      // fallback: manual two-step update
+      await supabase.from('income_sources').update({ is_default: false }).neq('id', id)
+      const { error: e2 } = await supabase.from('income_sources').update({ is_default: true }).eq('id', id)
+      if (e2) { toast.error('Failed to set default'); return }
+    }
+    setIncomeSources((prev) => prev.map((s) => ({ ...s, is_default: s.id === id })))
+    toast.success('Default source updated')
+  }
+
+  async function archiveSource(id: string, archive: boolean) {
+    const { error } = await supabase.from('income_sources').update({ is_active: !archive }).eq('id', id)
+    if (error) { toast.error('Failed to update'); return }
+    setIncomeSources((prev) => prev.map((s) => s.id === id ? { ...s, is_active: !archive } : s))
+    toast.success(archive ? 'Source archived' : 'Source restored')
+  }
+
+  async function deleteIncomeSource(id: string, name: string) {
+    const { count } = await supabase
+      .from('income')
+      .select('*', { count: 'exact', head: true })
+      .eq('income_source_id', id)
+    if ((count ?? 0) > 0) {
+      toast.error(`"${name}" has ${count} paycheck${count === 1 ? '' : 's'} — archive it instead`)
+      setSourceDeleteConfirm(null)
+      return
+    }
+    const { error } = await supabase.from('income_sources').delete().eq('id', id)
+    if (error) { toast.error('Failed to delete'); return }
+    setIncomeSources((prev) => prev.filter((s) => s.id !== id))
+    setSourceDeleteConfirm(null)
+    toast.success(`"${name}" deleted`)
   }
 
   // ─── Savings Accounts ──────────────────────────────────────────────────────
@@ -569,6 +666,191 @@ export default function SettingsPage() {
               {savingProjectedIncome ? 'Saving…' : 'Save'}
             </button>
           </div>
+        </div>
+      </section>
+
+      {/* ── Income Sources ───────────────────────────────────────────────── */}
+      <section>
+        <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
+          Income Sources
+        </h2>
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm divide-y divide-slate-100">
+          {loading ? (
+            <div className="p-5 space-y-3">
+              {[0, 1].map((i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <Bone className="h-3.5 flex-1" />
+                  <Bone className="h-7 w-20 rounded-md" />
+                  <Bone className="h-7 w-16 rounded-md" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <>
+              {/* Active sources */}
+              {incomeSources.filter((s) => s.is_active).length > 0 && (
+                <div className="p-5">
+                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Active</h3>
+                  {incomeSources.filter((s) => s.is_active).map((src) => (
+                    <div key={src.id} className="py-2.5 border-b border-slate-50 last:border-0">
+                      {editingSourceId === src.id ? (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <input
+                            type="text"
+                            value={editSourceName}
+                            onChange={(e) => setEditSourceName(e.target.value)}
+                            placeholder="Source name"
+                            className="flex-1 min-w-32 px-3 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                          />
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">$</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={editSourceRate}
+                              onChange={(e) => setEditSourceRate(e.target.value)}
+                              placeholder="Rate/hr"
+                              className="w-28 pl-6 pr-2 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-right"
+                            />
+                          </div>
+                          <button
+                            onClick={() => saveIncomeSource(src.id)}
+                            className="text-xs px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={() => setEditingSourceId(null)}
+                            className="text-xs px-2.5 py-1.5 border border-slate-300 hover:bg-slate-50 text-slate-600 rounded-lg font-medium transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-3">
+                          <i className="ti ti-briefcase text-slate-400 shrink-0" style={{ fontSize: 15 }} />
+                          <span className="text-sm text-slate-700 flex-1 min-w-0 truncate">{src.name}</span>
+                          <span className="text-xs text-slate-400 shrink-0">
+                            {src.hourly_rate ? `$${parseFloat(src.hourly_rate).toFixed(2)}/hr` : '—'}
+                          </span>
+                          {src.is_default && (
+                            <span className="text-xs font-semibold px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600 border border-indigo-200 shrink-0">
+                              Default
+                            </span>
+                          )}
+                          {!src.is_default && (
+                            <button
+                              onClick={() => setDefaultSource(src.id)}
+                              className="text-xs px-2 py-1 border border-slate-300 hover:bg-slate-50 text-slate-500 rounded-lg font-medium transition-colors shrink-0"
+                            >
+                              Set default
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              setEditingSourceId(src.id)
+                              setEditSourceName(src.name)
+                              setEditSourceRate(src.hourly_rate)
+                            }}
+                            className="text-xs px-2.5 py-1 border border-slate-300 hover:bg-slate-50 text-slate-500 rounded-lg font-medium transition-colors shrink-0"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => archiveSource(src.id, true)}
+                            className="text-xs px-2.5 py-1 border border-slate-300 hover:bg-slate-50 text-slate-500 rounded-lg font-medium transition-colors shrink-0"
+                          >
+                            Archive
+                          </button>
+                          {sourceDeleteConfirm === src.id ? (
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="text-xs text-slate-500">Delete?</span>
+                              <button
+                                onClick={() => deleteIncomeSource(src.id, src.name)}
+                                className="text-xs px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded font-medium"
+                              >
+                                Yes
+                              </button>
+                              <button
+                                onClick={() => setSourceDeleteConfirm(null)}
+                                className="text-xs px-2 py-1 border border-slate-300 hover:bg-slate-50 text-slate-600 rounded font-medium"
+                              >
+                                No
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setSourceDeleteConfirm(src.id)}
+                              className="shrink-0 text-slate-300 hover:text-red-400 transition-colors text-lg leading-none"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Archived sources */}
+              {incomeSources.filter((s) => !s.is_active).length > 0 && (
+                <div className="p-5">
+                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Archived</h3>
+                  {incomeSources.filter((s) => !s.is_active).map((src) => (
+                    <div key={src.id} className="flex items-center gap-3 py-2.5 border-b border-slate-50 last:border-0">
+                      <i className="ti ti-briefcase text-slate-300 shrink-0" style={{ fontSize: 15 }} />
+                      <span className="text-sm text-slate-400 flex-1 min-w-0 truncate">{src.name}</span>
+                      <span className="text-xs text-slate-300 shrink-0">
+                        {src.hourly_rate ? `$${parseFloat(src.hourly_rate).toFixed(2)}/hr` : '—'}
+                      </span>
+                      <button
+                        onClick={() => archiveSource(src.id, false)}
+                        className="text-xs px-2.5 py-1 border border-slate-300 hover:bg-slate-50 text-slate-500 rounded-lg font-medium transition-colors shrink-0"
+                      >
+                        Restore
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add form */}
+              <div className="p-5">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Add Source</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <input
+                    type="text"
+                    value={newSourceName}
+                    onChange={(e) => setNewSourceName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && addIncomeSource()}
+                    placeholder="Source name (e.g. Main Job)"
+                    className="flex-1 min-w-40 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                  />
+                  <div className="relative">
+                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={newSourceRate}
+                      onChange={(e) => setNewSourceRate(e.target.value)}
+                      placeholder="Rate/hr"
+                      className="w-28 pl-6 pr-2 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-right"
+                    />
+                  </div>
+                  <button
+                    onClick={addIncomeSource}
+                    disabled={addingSource || !newSourceName.trim()}
+                    className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white text-xs font-semibold rounded-lg transition-colors"
+                  >
+                    {addingSource ? 'Adding…' : '+ Add'}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </section>
 
