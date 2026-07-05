@@ -18,6 +18,7 @@ export async function POST() {
     await supabase.from('recurring_expenses').delete().neq('id', '00000000-0000-0000-0000-000000000000')
     await supabase.from('income').delete().neq('id', '00000000-0000-0000-0000-000000000000')
     await supabase.from('payment_methods').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+    await supabase.from('app_settings').upsert({ key: 'projected_monthly_income', value: '4000' }, { onConflict: 'key' })
     await supabase.from('budget_targets').delete().neq('category', '')
 
     // ── Payment Methods ────────────────────────────────────────────────────
