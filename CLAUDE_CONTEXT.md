@@ -17,7 +17,8 @@ A personal budget tracker I built for myself. It's not a SaaS product — just a
 - **Supabase** (PostgreSQL) for the database — no auth yet, RLS is off
 - **Recharts** for charts
 - **Tabler Icons** (webfont via CDN) for all icons — used as `<i className="ti ti-icon-name">`
-- Deployed on **Vercel** (env vars set in Vercel dashboard)
+- Deployed on **Vercel** via GitHub integration (push to `main` auto-deploys)
+- Live at: `https://budget-app-bay-omega.vercel.app`
 
 ---
 
@@ -35,43 +36,74 @@ Recurring expense support: a "Recurring expense" checkbox expands a panel to con
 
 **Savings (`/savings`)** — Track savings contributions to accounts and goal buckets. Month picker at top. Two summary cards (this month total, all-time total). **Accounts section**: each active account shows total balance, this month's contributions, expandable monthly contribution history, "+ Add" button opens a contribute modal, each contribution row has Edit + Delete. **Goals section**: each active goal shows name, target amount, progress bar (purple fill → green when complete), "Complete!" badge, expandable monthly history, "+ Add" button, each contribution row has Edit + Delete. Contribute modal works for both account and goal contributions and supports editing existing entries.
 
-**Budget Overview (`/budget`)** — Has **month picker** to view any past month. Four sections:
-1. Summary banner: Net Income / Expenses / Net for the selected month
-2. Formula bar: income − fixed − utilities − variable − savings = spending money (savings pulls real data from savings_contributions + savings_goal_contributions)
-3. **Month-end Surplus card**: shown for past months with income > 0 and unswept surplus — amber banner with "Log as savings" button that opens a sweep modal (account picker, amount pre-filled, date pre-filled to last day of month). Turns green "Fully allocated ✓" after sweeping.
-4. Budget vs. Actual table: **three sections** — Fixed/Recurring, Utilities, Variable/Daily — each category with inline-editable monthly target, actual spent, remaining, color progress bar
-5. Charts: bar chart (spending by category), line chart (6-month income vs. expenses trend), donut chart (expense breakdown)
+**Budget Overview (`/budget`)** — Has **month picker** to view any past month. Five sections:
 
-**Settings (`/settings`)** — Seven sections:
-1. **Categories & Budget Targets**: add, delete, toggle Fixed / Utility / Variable (three-way selector), set monthly targets — full CRUD on `budget_targets`. Three display sections: Fixed/Recurring, Utilities, Variable/Daily.
-2. **Savings Accounts**: add, archive/restore, delete — manages `savings_accounts`
-3. **Payment Methods**: add (nickname + optional due date + optional statement close date), edit, archive/restore, delete — manages `payment_methods` table. `expenses.payment_method` stores the nickname string.
-4. **Savings Goals**: add (name + target amount), archive/restore, delete — manages `savings_goals`
-5. **Pay Rate Tiers**: add/edit/delete overtime tiers (label + multiplier). Regular tier is system-protected (can't delete, can't rename). Used in the income entry form to calculate gross from a tier breakdown. Stored in `overtime_rules`.
-6. **Demo Data**: "Reset Demo Data" button with a confirmation warning — wipes all data and loads 3 months of realistic demo entries (April–June 2026). ⚠️ Known issue: the reset-demo API doesn't set `category_type`, so all budget targets land in Variable after a reset — they need to be manually re-typed in Settings.
-7. **Supabase Connection**: project URL, live record counts, connection health check
+1. **Summary banner**: Net Income / Expenses / Net for the selected month.
 
-### UI / design system
+2. **Overhead card** (static, always visible): Shows fixed monthly total (sum of `monthly_target` for all `fixed` categories), variable monthly projected (sum of `monthly_target` for all `variable_monthly` categories), and combined overhead = fixed + variable monthly. Uses set/projected amounts only — not actual spend.
+
+3. **Dual formula bars** (side by side):
+   - **Real**: actual logged income − fixed deduction − var. monthly deduction − var. daily expenses − savings = spending money
+   - **Projected**: projected monthly income (from Settings) − same deductions = projected spending money
+   - If projected income is not set, the Projected bar shows "— set in Settings" with a link.
+   - Formula deduction logic: Fixed always deducts `monthly_target` regardless of actual spend. Variable Monthly deducts `max(monthly_target, actual_spend)` per category. Variable Daily deducts actual spend only.
+   - Savings deduction pulls real data from `savings_contributions` + `savings_goal_contributions`.
+
+4. **Month-end Surplus card**: Shown for past months with income > 0 and unswept surplus — amber banner with "Log as savings" button that opens a sweep modal (account picker, amount pre-filled, date pre-filled to last day of month). Turns green "Fully allocated ✓" after sweeping.
+
+5. **Budget vs. Actual table**: Three distinct sections with different column layouts:
+   - **Fixed Monthly**: Category | Set Amount (inline-editable) | Actual Logged | Difference. No progress bar. Difference = actual − set; green if ≤ 0, red if > 0.
+   - **Variable Monthly**: Category | Monthly Projection (inline-editable) | Actual | Difference | % Used with progress bar.
+   - **Variable Daily**: Category | Monthly Target (inline-editable) | Actual | Remaining | % Used with progress bar.
+
+6. **Charts**: bar chart (spending by category), line chart (6-month income vs. expenses trend), donut chart (expense breakdown).
+
+**Settings (`/settings`)** — Eight sections:
+
+1. **Projected Monthly Income**: Single number field for expected monthly net income. Saves to `app_settings` table. Shown on Budget page Projected formula bar.
+
+2. **Categories & Budget Targets**: Add, delete, toggle Fixed Monthly / Variable Monthly / Variable Daily (three-way selector), set monthly targets — full CRUD on `budget_targets`. Three display sections matching the type names. Amount input is editable inline; save with "Save All" button.
+
+3. **Savings Accounts**: add, archive/restore, delete — manages `savings_accounts`.
+
+4. **Payment Methods**: add (nickname + optional due date + optional statement close date), edit, archive/restore, delete — manages `payment_methods` table. `expenses.payment_method` stores the nickname string.
+
+5. **Savings Goals**: add (name + target amount), archive/restore, delete — manages `savings_goals`.
+
+6. **Pay Rate Tiers**: add/edit/delete overtime tiers (label + multiplier). Regular tier is system-protected (can't delete, can't rename). Used in the income entry form to calculate gross from a tier breakdown. Stored in `overtime_rules`.
+
+7. **Demo Data**: "Reset Demo Data" button with a confirmation warning — wipes all data (including `recurring_expenses` and `income_hours_breakdown`) and loads 3 months of realistic demo entries (April–June 2026). Also seeds `projected_monthly_income = $4,000`. Demo categories are correctly typed on reset.
+
+8. **Supabase Connection**: project URL, live record counts, connection health check.
+
+---
+
+## Budget category model
+
+Categories have three types, stored as `category_type` in `budget_targets`:
+
+| Type | DB value | Label in UI | Formula behavior | Table columns |
+|------|----------|-------------|-----------------|---------------|
+| Fixed Monthly | `'fixed'` | Fixed Monthly | Always deducts `monthly_target` | Set Amount / Actual / Difference (no bar) |
+| Variable Monthly | `'variable_monthly'` | Variable Monthly | Deducts `max(target, actual)` | Projection / Actual / Difference / % Used |
+| Variable Daily | `'variable_daily'` | Variable Daily | Deducts actual spend only | Target / Actual / Remaining / % Used |
+
+DB CHECK constraint enforces: `category_type IN ('fixed', 'variable_monthly', 'variable_daily')`.
+
+Default demo categories:
+- **Fixed Monthly**: Rent, Car Insurance, Subscriptions, Transit
+- **Variable Monthly**: Gas Bill, Electricity, Wifi, Water
+- **Variable Daily**: Groceries, Dining, Social, Home, Clothing, Entertainment, Other
+
+---
+
+## UI / design system
 
 - Purple/blue theme: brand color `#7F77DD`, icon tint `#AFA9EC`
 - Per-category colored `CategoryBadge` component (icon circle + pill label)
 - `CategoryPicker` chip grid replacing native `<select>` everywhere
 - `MonthPicker` component: `← Month Year →` navigator, disabled past current month, "Today" snap-back button
 - Navigation: 5 tabs (Add Expense, Expenses, Income, Savings, Budget) + Settings gear
-
-### Categories (configurable via Settings)
-
-**Fixed/Recurring**: Rent, Car Insurance, Subscriptions, Transit
-
-**Utilities** (monthly but variable amount): Gas Bill, Electricity, Wifi, Water
-
-**Variable/Daily**: Groceries, Social, Home, Clothing, Dining, Entertainment, Other
-
-Categories are stored in `budget_targets` with a `category_type` column (`'fixed' | 'utility' | 'variable'`). Fully add/delete/retype in Settings. Not hardcoded. No DB-level check constraints on category values.
-
-### Payment methods
-
-User-managed via Settings → Payment Methods. Stored in a `payment_methods` table (nickname, payment_due_date, statement_close_date, is_active). The expense form populates from this table. No DB-level check constraints on payment_method values.
 
 ---
 
@@ -81,9 +113,9 @@ User-managed via Settings → Payment Methods. Stored in a `payment_methods` tab
 
 **`income`**: id, source, paycheck_date, gross_amount, taxes_withheld, net_amount, hours_worked, hourly_rate, notes, created_at
 
-**`budget_targets`**: id, category, monthly_target, is_recurring, category_type ('fixed'|'utility'|'variable', default 'variable'), created_at
+**`budget_targets`**: id, category, monthly_target, is_recurring, category_type (`'fixed'|'variable_monthly'|'variable_daily'`, CHECK constraint), created_at
 
-**`recurring_expenses`**: id, description, merchant, amount, category, payment_method, notes, type ('subscription'|'utility'), frequency ('monthly'|'weekly'|'biweekly'|'yearly'), day_of_month (int|null), day_of_week (int|null), month_of_year (int|null), start_date, next_due_date, is_active, created_at
+**`recurring_expenses`**: id, description, merchant, amount, category, payment_method, notes, type (`'subscription'|'utility'`), frequency (`'monthly'|'weekly'|'biweekly'|'yearly'`), day_of_month (int|null), day_of_week (int|null), month_of_year (int|null), start_date, next_due_date, is_active, created_at
 
 **`payment_methods`**: id, nickname, payment_due_date (int, day of month), statement_close_date (int, day of month), is_active, created_at
 
@@ -99,6 +131,8 @@ User-managed via Settings → Payment Methods. Stored in a `payment_methods` tab
 
 **`income_hours_breakdown`**: id, income_id (→ income), rule_id (→ overtime_rules, nullable), label, multiplier, hours_worked, base_rate, subtotal, created_at
 
+**`app_settings`**: key (TEXT PRIMARY KEY), value (TEXT) — currently stores `projected_monthly_income`
+
 ---
 
 ## API routes & automation
@@ -107,7 +141,7 @@ User-managed via Settings → Payment Methods. Stored in a `payment_methods` tab
 
 **`GET /api/cron/payment-reminders`** — Vercel cron job, runs daily at 8:00 AM (configured in `vercel.json`). Requires `Authorization: Bearer <CRON_SECRET>` header. Proxies to a Supabase Edge Function (`send-payment-reminders`) which sends payment reminder emails based on `payment_methods.payment_due_date` and `statement_close_date`.
 
-**`POST /api/reset-demo`** — Wipes all user data and reloads the demo dataset (April–June 2026). Called by the Settings → Demo Data button.
+**`POST /api/reset-demo`** — Wipes all user data (all tables including `recurring_expenses`, `income_hours_breakdown`, `app_settings` projected income gets reset to $4,000) and reloads the demo dataset (April–June 2026). Called by the Settings → Demo Data button.
 
 ---
 
