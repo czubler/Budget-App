@@ -168,6 +168,10 @@ export default function SettingsPage() {
   const [editTierLabel, setEditTierLabel] = useState('')
   const [editTierMultiplier, setEditTierMultiplier] = useState('')
 
+  // projected income
+  const [projectedIncome, setProjectedIncome] = useState('')
+  const [savingProjectedIncome, setSavingProjectedIncome] = useState(false)
+
   // demo data
   const [demoConfirm, setDemoConfirm] = useState(false)
   const [demoResetting, setDemoResetting] = useState(false)
@@ -196,6 +200,7 @@ export default function SettingsPage() {
         { data: goalData, error: gErr },
         { data: pmData, error: pmErr },
         { data: tiersData, error: tiersErr },
+        { data: settingsData, error: settingsErr },
       ] = await Promise.all([
         supabase
           .from('budget_targets')
@@ -208,9 +213,13 @@ export default function SettingsPage() {
         supabase.from('savings_goals').select('id, name, target_amount, is_archived').order('name'),
         supabase.from('payment_methods').select('id, nickname, payment_due_date, statement_close_date, is_active').order('nickname'),
         supabase.from('overtime_rules').select('id, label, multiplier, sort_order').order('sort_order'),
+        supabase.from('app_settings').select('key, value'),
       ])
 
-      if (tErr || eErr || iErr || aErr || gErr || pmErr || tiersErr) throw new Error('Query failed')
+      if (tErr || eErr || iErr || aErr || gErr || pmErr || tiersErr || settingsErr) throw new Error('Query failed')
+
+      const piRow = settingsData?.find((r) => r.key === 'projected_monthly_income')
+      setProjectedIncome(piRow ? piRow.value : '0')
 
       setRows(
         targetData?.map((t) => ({
@@ -265,6 +274,18 @@ export default function SettingsPage() {
     setSaving(false)
     if (error) { toast.error('Failed to save'); return }
     toast.success('Categories & targets saved!')
+  }
+
+  async function saveProjectedIncome() {
+    const val = parseFloat(projectedIncome)
+    if (isNaN(val) || val < 0) return
+    setSavingProjectedIncome(true)
+    const { error } = await supabase
+      .from('app_settings')
+      .upsert({ key: 'projected_monthly_income', value: String(val) }, { onConflict: 'key' })
+    setSavingProjectedIncome(false)
+    if (error) { toast.error('Failed to save'); return }
+    toast.success('Projected income saved')
   }
 
   async function addCategory() {
@@ -515,6 +536,41 @@ export default function SettingsPage() {
   return (
     <div className="space-y-8">
       <h1 className="text-xl font-bold text-slate-800">Settings</h1>
+
+      {/* ── Projected Income ─────────────────────────────────────────────── */}
+      <section>
+        <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
+          Projected Monthly Income
+        </h2>
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+          <p className="text-xs text-slate-500 mb-3">
+            Your expected net income per month. Used on the Budget page to show a projected spending money figure alongside your real logged income.
+          </p>
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm select-none">$</span>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={projectedIncome}
+                onChange={(e) => setProjectedIncome(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && saveProjectedIncome()}
+                disabled={loading || savingProjectedIncome}
+                placeholder="0"
+                className="w-40 pl-7 pr-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white disabled:bg-slate-50"
+              />
+            </div>
+            <button
+              onClick={saveProjectedIncome}
+              disabled={loading || savingProjectedIncome}
+              className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white text-xs font-semibold rounded-lg transition-colors"
+            >
+              {savingProjectedIncome ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+      </section>
 
       {/* ── Categories & Budget Targets ──────────────────────────────────── */}
       <section>

@@ -539,6 +539,7 @@ export default function BudgetPage() {
     const now = new Date()
     return { year: now.getFullYear(), month: now.getMonth() + 1 }
   })
+  const [projectedMonthlyIncome, setProjectedMonthlyIncome] = useState(0)
   const [savingsAccounts, setSavingsAccounts] = useState<SavingsAccount[]>([])
   const [sweepModalOpen, setSweepModalOpen] = useState(false)
   const [wasSurplusSwept, setWasSurplusSwept] = useState(false)
@@ -564,6 +565,7 @@ export default function BudgetPage() {
       { data: savingsAcctMonth },
       { data: savingsGoalMonth },
       { data: acctData },
+      { data: settingsData },
     ] = await Promise.all([
       supabase.from('income').select('net_amount').gte('paycheck_date', mStart).lte('paycheck_date', mEnd),
       supabase.from('expenses').select('amount, category').gte('date', mStart).lte('date', mEnd),
@@ -573,6 +575,7 @@ export default function BudgetPage() {
       supabase.from('savings_contributions').select('amount').gte('date', mStart).lte('date', mEnd),
       supabase.from('savings_goal_contributions').select('amount').gte('date', mStart).lte('date', mEnd),
       supabase.from('savings_accounts').select('*').eq('is_active', true).order('name'),
+      supabase.from('app_settings').select('key, value').eq('key', 'projected_monthly_income'),
     ])
 
     // Current month totals
@@ -639,6 +642,8 @@ export default function BudgetPage() {
     setTrendData(trend)
     setMonthlySavings(savings)
     setSavingsAccounts(acctData ?? [])
+    const piRow = settingsData?.find((r) => r.key === 'projected_monthly_income')
+    setProjectedMonthlyIncome(piRow ? parseFloat(piRow.value) || 0 : 0)
     setLoading(false)
   }
 
@@ -669,6 +674,7 @@ export default function BudgetPage() {
     .reduce((s, t) => s + Number(t.monthly_target ?? 0), 0)
   const estimatedOverhead = fixedMonthlyTotal + varMonthlyProjected
   const personalSpending = monthIncome - fixedDeduction - varMonthlyDeduction - varDailyExpenses - monthlySavings
+  const projectedSpending = projectedMonthlyIncome - fixedDeduction - varMonthlyDeduction - varDailyExpenses - monthlySavings
 
   const now = new Date()
   const isPastMonth =
@@ -731,39 +737,67 @@ export default function BudgetPage() {
           </div>
         </div>
 
-        {/* Formula bar */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-3.5">
-          <p className="text-xs text-slate-400 mb-2 font-medium uppercase tracking-wider">Monthly spending breakdown</p>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-            <span className="font-semibold text-emerald-600">{usd(monthIncome)}</span>
-            <span className="text-slate-400">income</span>
+        {/* Formula bars — Real and Projected */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* Real */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-3.5">
+            <p className="text-xs text-slate-400 mb-2 font-medium uppercase tracking-wider">Real</p>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+              <span className="font-semibold text-emerald-600">{usd(monthIncome)}</span>
+              <span className="text-slate-400">income</span>
+              <span className="text-slate-300 mx-1">−</span>
+              <span className="font-semibold text-slate-700">{usd(fixedDeduction)}</span>
+              <span className="text-slate-400">fixed</span>
+              <span className="text-slate-300 mx-1">−</span>
+              <span className="font-semibold text-slate-700">{usd(varMonthlyDeduction)}</span>
+              <span className="text-slate-400">var. monthly</span>
+              <span className="text-slate-300 mx-1">−</span>
+              <span className="font-semibold text-slate-700">{usd(varDailyExpenses)}</span>
+              <span className="text-slate-400">var. daily</span>
+              <span className="text-slate-300 mx-1">−</span>
+              <span className="font-semibold text-slate-400">{usd(monthlySavings)}</span>
+              <span className="text-slate-400">savings</span>
+              <span className="text-slate-300 mx-1">=</span>
+              <span className={`font-bold text-base ${personalSpending >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                {personalSpending >= 0 ? usd(personalSpending) : `-${usd(Math.abs(personalSpending))}`}
+              </span>
+              <span className="text-slate-500 font-medium">spending money</span>
+            </div>
+          </div>
 
-            <span className="text-slate-300 mx-1">−</span>
-
-            <span className="font-semibold text-slate-700">{usd(fixedDeduction)}</span>
-            <span className="text-slate-400">fixed</span>
-
-            <span className="text-slate-300 mx-1">−</span>
-
-            <span className="font-semibold text-slate-700">{usd(varMonthlyDeduction)}</span>
-            <span className="text-slate-400">var. monthly</span>
-
-            <span className="text-slate-300 mx-1">−</span>
-
-            <span className="font-semibold text-slate-700">{usd(varDailyExpenses)}</span>
-            <span className="text-slate-400">var. daily</span>
-
-            <span className="text-slate-300 mx-1">−</span>
-
-            <span className="font-semibold text-slate-400">{usd(monthlySavings)}</span>
-            <span className="text-slate-400">savings</span>
-
-            <span className="text-slate-300 mx-1">=</span>
-
-            <span className={`font-bold text-base ${personalSpending >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-              {personalSpending >= 0 ? usd(personalSpending) : `-${usd(Math.abs(personalSpending))}`}
-            </span>
-            <span className="text-slate-500 font-medium">spending money</span>
+          {/* Projected */}
+          <div className="bg-slate-50 rounded-xl border border-slate-200 shadow-sm px-5 py-3.5">
+            <p className="text-xs text-slate-400 mb-2 font-medium uppercase tracking-wider flex items-center gap-1.5">
+              Projected
+              {projectedMonthlyIncome === 0 && (
+                <a href="/settings" className="text-indigo-500 hover:text-indigo-600 font-normal normal-case tracking-normal">
+                  — set in Settings
+                </a>
+              )}
+            </p>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+              <span className={`font-semibold ${projectedMonthlyIncome > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                {usd(projectedMonthlyIncome)}
+              </span>
+              <span className="text-slate-400">income</span>
+              <span className="text-slate-300 mx-1">−</span>
+              <span className="font-semibold text-slate-700">{usd(fixedDeduction)}</span>
+              <span className="text-slate-400">fixed</span>
+              <span className="text-slate-300 mx-1">−</span>
+              <span className="font-semibold text-slate-700">{usd(varMonthlyDeduction)}</span>
+              <span className="text-slate-400">var. monthly</span>
+              <span className="text-slate-300 mx-1">−</span>
+              <span className="font-semibold text-slate-700">{usd(varDailyExpenses)}</span>
+              <span className="text-slate-400">var. daily</span>
+              <span className="text-slate-300 mx-1">−</span>
+              <span className="font-semibold text-slate-400">{usd(monthlySavings)}</span>
+              <span className="text-slate-400">savings</span>
+              <span className="text-slate-300 mx-1">=</span>
+              <span className={`font-bold text-base ${projectedMonthlyIncome === 0 ? 'text-slate-400' : projectedSpending >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                {projectedMonthlyIncome === 0 ? '—' : projectedSpending >= 0 ? usd(projectedSpending) : `-${usd(Math.abs(projectedSpending))}`}
+              </span>
+              {projectedMonthlyIncome > 0 && <span className="text-slate-500 font-medium">spending money</span>}
+            </div>
           </div>
         </div>
       </div>
