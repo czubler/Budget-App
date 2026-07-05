@@ -187,6 +187,10 @@ export default function SettingsPage() {
   const [demoConfirm, setDemoConfirm] = useState(false)
   const [demoResetting, setDemoResetting] = useState(false)
 
+  // wipe data
+  const [wipeConfirm, setWipeConfirm] = useState(false)
+  const [wiping, setWiping] = useState(false)
+
   useEffect(() => { init() }, [])
 
   const fixed = rows.filter((r) => r.category_type === 'fixed')
@@ -625,6 +629,19 @@ export default function SettingsPage() {
       toast.error('Failed to reset demo data')
     } finally {
       setDemoResetting(false)
+    }
+  }
+
+  async function wipeData() {
+    setWiping(true)
+    try {
+      const res = await fetch('/api/wipe-data', { method: 'POST' })
+      if (!res.ok) throw new Error('Request failed')
+      toast.success('All data wiped')
+      window.location.reload()
+    } catch {
+      toast.error('Failed to wipe data')
+      setWiping(false)
     }
   }
 
@@ -1581,52 +1598,110 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* ── Demo Data ────────────────────────────────────────────────────── */}
+      {/* ── Data Management ──────────────────────────────────────────────── */}
       <section>
         <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
-          Demo Data
+          Data Management
         </h2>
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-          <p className="text-sm text-slate-600 mb-4">
-            Wipes all data and loads 3 months of realistic demo data — April through June 2026. Useful for exploring the app before adding real entries.
-          </p>
-          <ul className="text-xs text-slate-500 space-y-1 mb-4 list-disc list-inside">
-            <li>58 expenses across 15 categories</li>
-            <li>6 paychecks ($2,000 net each) from Acme Corp</li>
-            <li>2 savings accounts + 2 savings goals</li>
-            <li>5 payment methods (Chase Sapphire, Apple Card, Wells Fargo Debit, Cash, Venmo)</li>
-            <li>Chase Sapphire closes 21st · Apple Card closes 3rd (for payment reminder emails)</li>
-            <li>May is intentionally over budget on Dining &amp; Social</li>
-          </ul>
-          {demoConfirm ? (
-            <div className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-              <i className="ti ti-alert-triangle text-amber-500" style={{ fontSize: 16 }} />
-              <span className="text-sm text-amber-700 flex-1">This will delete all your current data. Continue?</span>
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-5">
+
+          {/* Demo Data */}
+          <div>
+            <p className="text-sm font-medium text-slate-700 mb-1">Reset Demo Data</p>
+            <p className="text-sm text-slate-500 mb-3">
+              Wipes all data and loads 3 months of realistic demo entries — April through June 2026.
+            </p>
+            <ul className="text-xs text-slate-400 space-y-1 mb-4 list-disc list-inside">
+              <li>58 expenses across 15 categories</li>
+              <li>6 paychecks ($2,000 net each) from Acme Corp</li>
+              <li>2 savings accounts + 2 savings goals</li>
+              <li>5 payment methods (Chase Sapphire, Apple Card, Wells Fargo Debit, Cash, Venmo)</li>
+              <li>May is intentionally over budget on Dining &amp; Social</li>
+            </ul>
+            {demoConfirm ? (
+              <div className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <i className="ti ti-alert-triangle text-amber-500" style={{ fontSize: 16 }} />
+                <span className="text-sm text-amber-700 flex-1">This will delete all your current data. Continue?</span>
+                <button
+                  onClick={resetDemo}
+                  disabled={demoResetting}
+                  className="px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white text-xs font-semibold rounded-lg transition-colors shrink-0"
+                >
+                  {demoResetting ? 'Resetting…' : 'Yes, wipe & reload'}
+                </button>
+                <button
+                  onClick={() => setDemoConfirm(false)}
+                  disabled={demoResetting}
+                  className="px-3 py-1.5 border border-slate-300 hover:bg-slate-50 text-slate-600 text-xs font-semibold rounded-lg transition-colors shrink-0"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
               <button
-                onClick={resetDemo}
-                disabled={demoResetting}
-                className="px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white text-xs font-semibold rounded-lg transition-colors shrink-0"
+                onClick={() => setDemoConfirm(true)}
+                className="px-4 py-2 border border-slate-300 hover:border-red-300 hover:text-red-600 text-slate-600 text-sm font-medium rounded-lg transition-colors"
               >
-                {demoResetting ? 'Resetting…' : 'Yes, wipe & reload'}
+                Reset Demo Data
               </button>
+            )}
+          </div>
+
+          <div className="border-t border-slate-100" />
+
+          {/* Wipe all data */}
+          <div>
+            <p className="text-sm font-medium text-slate-700 mb-1">Wipe All Data</p>
+            <p className="text-sm text-slate-500 mb-3">
+              Permanently delete all expenses, income, savings, categories, and settings. Keeps system pay rate tiers. There is no undo.
+            </p>
+            <button
+              onClick={() => setWipeConfirm(true)}
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              Wipe All Data
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Wipe confirmation modal ───────────────────────────────────────── */}
+      {wipeConfirm && (
+        <div
+          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+          onClick={(e) => { if (e.target === e.currentTarget && !wiping) setWipeConfirm(false) }}
+        >
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+                <i className="ti ti-trash text-red-600" style={{ fontSize: 18 }} />
+              </div>
+              <h2 className="text-lg font-semibold text-slate-800">Wipe all data?</h2>
+            </div>
+            <p className="text-sm text-slate-600 mb-6">
+              This will permanently delete everything — expenses, income, savings, categories, and settings. There is no undo.
+            </p>
+            <div className="flex gap-3">
               <button
-                onClick={() => setDemoConfirm(false)}
-                disabled={demoResetting}
-                className="px-3 py-1.5 border border-slate-300 hover:bg-slate-50 text-slate-600 text-xs font-semibold rounded-lg transition-colors shrink-0"
+                type="button"
+                onClick={() => setWipeConfirm(false)}
+                disabled={wiping}
+                className="flex-1 py-2.5 border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
               >
                 Cancel
               </button>
+              <button
+                type="button"
+                onClick={wipeData}
+                disabled={wiping}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white text-sm font-semibold rounded-lg transition-colors"
+              >
+                {wiping ? 'Deleting…' : 'Delete everything'}
+              </button>
             </div>
-          ) : (
-            <button
-              onClick={() => setDemoConfirm(true)}
-              className="px-4 py-2 border border-slate-300 hover:border-red-300 hover:text-red-600 text-slate-600 text-sm font-medium rounded-lg transition-colors"
-            >
-              Reset Demo Data
-            </button>
-          )}
+          </div>
         </div>
-      </section>
+      )}
 
       {/* ── Connection Status ────────────────────────────────────────────── */}
       <section>
