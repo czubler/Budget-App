@@ -13,7 +13,9 @@ export async function POST() {
     await supabase.from('savings_contributions').delete().neq('id', '00000000-0000-0000-0000-000000000000')
     await supabase.from('savings_goals').delete().neq('id', '00000000-0000-0000-0000-000000000000')
     await supabase.from('savings_accounts').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+    await supabase.from('income_hours_breakdown').delete().neq('id', '00000000-0000-0000-0000-000000000000')
     await supabase.from('expenses').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+    await supabase.from('recurring_expenses').delete().neq('id', '00000000-0000-0000-0000-000000000000')
     await supabase.from('income').delete().neq('id', '00000000-0000-0000-0000-000000000000')
     await supabase.from('payment_methods').delete().neq('id', '00000000-0000-0000-0000-000000000000')
     await supabase.from('budget_targets').delete().neq('category', '')
@@ -35,21 +37,21 @@ export async function POST() {
 
     // ── Budget Targets ─────────────────────────────────────────────────────
     const { error: btErr } = await supabase.from('budget_targets').insert([
-      { category: 'Rent', monthly_target: 1100, is_recurring: true },
-      { category: 'Gas Bill', monthly_target: 50, is_recurring: true },
-      { category: 'Electricity', monthly_target: 65, is_recurring: true },
-      { category: 'Wifi', monthly_target: 55, is_recurring: true },
-      { category: 'Water', monthly_target: 35, is_recurring: true },
-      { category: 'Car Insurance', monthly_target: 110, is_recurring: true },
-      { category: 'Subscriptions', monthly_target: 40, is_recurring: true },
-      { category: 'Transit', monthly_target: 85, is_recurring: true },
-      { category: 'Groceries', monthly_target: 300, is_recurring: false },
-      { category: 'Dining', monthly_target: 150, is_recurring: false },
-      { category: 'Social', monthly_target: 120, is_recurring: false },
-      { category: 'Home', monthly_target: 80, is_recurring: false },
-      { category: 'Clothing', monthly_target: 80, is_recurring: false },
-      { category: 'Entertainment', monthly_target: 60, is_recurring: false },
-      { category: 'Other', monthly_target: 50, is_recurring: false },
+      { category: 'Rent', monthly_target: 1100, is_recurring: true, category_type: 'fixed' },
+      { category: 'Car Insurance', monthly_target: 110, is_recurring: true, category_type: 'fixed' },
+      { category: 'Subscriptions', monthly_target: 40, is_recurring: true, category_type: 'fixed' },
+      { category: 'Transit', monthly_target: 85, is_recurring: true, category_type: 'fixed' },
+      { category: 'Gas Bill', monthly_target: 50, is_recurring: false, category_type: 'variable_monthly' },
+      { category: 'Electricity', monthly_target: 65, is_recurring: false, category_type: 'variable_monthly' },
+      { category: 'Wifi', monthly_target: 55, is_recurring: false, category_type: 'variable_monthly' },
+      { category: 'Water', monthly_target: 35, is_recurring: false, category_type: 'variable_monthly' },
+      { category: 'Groceries', monthly_target: 300, is_recurring: false, category_type: 'variable_daily' },
+      { category: 'Dining', monthly_target: 150, is_recurring: false, category_type: 'variable_daily' },
+      { category: 'Social', monthly_target: 120, is_recurring: false, category_type: 'variable_daily' },
+      { category: 'Home', monthly_target: 80, is_recurring: false, category_type: 'variable_daily' },
+      { category: 'Clothing', monthly_target: 80, is_recurring: false, category_type: 'variable_daily' },
+      { category: 'Entertainment', monthly_target: 60, is_recurring: false, category_type: 'variable_daily' },
+      { category: 'Other', monthly_target: 50, is_recurring: false, category_type: 'variable_daily' },
     ])
     if (btErr) throw btErr
 

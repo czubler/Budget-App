@@ -6,7 +6,7 @@ import toast from 'react-hot-toast'
 import { Bone } from '@/components/Skeleton'
 
 type ConnStatus = 'checking' | 'ok' | 'error'
-type CatRow = { category: string; monthly_target: string; category_type: 'fixed' | 'utility' | 'variable' }
+type CatRow = { category: string; monthly_target: string; category_type: 'fixed' | 'variable_monthly' | 'variable_daily' }
 type AccountRow = { id: string; name: string; is_active: boolean }
 type GoalRow = { id: string; name: string; target_amount: string; is_archived: boolean }
 type PaymentMethodRow = { id: string; nickname: string; payment_due_date: string; statement_close_date: string; is_active: boolean }
@@ -26,14 +26,14 @@ function CategoryTypeSelector({
   onChange,
   disabled,
 }: {
-  value: 'fixed' | 'utility' | 'variable'
-  onChange: (v: 'fixed' | 'utility' | 'variable') => void
+  value: 'fixed' | 'variable_monthly' | 'variable_daily'
+  onChange: (v: 'fixed' | 'variable_monthly' | 'variable_daily') => void
   disabled?: boolean
 }) {
-  const options: { key: 'fixed' | 'utility' | 'variable'; label: string }[] = [
-    { key: 'fixed', label: 'Fixed' },
-    { key: 'utility', label: 'Utility' },
-    { key: 'variable', label: 'Variable' },
+  const options: { key: 'fixed' | 'variable_monthly' | 'variable_daily'; label: string }[] = [
+    { key: 'fixed', label: 'Fixed Monthly' },
+    { key: 'variable_monthly', label: 'Variable Monthly' },
+    { key: 'variable_daily', label: 'Variable Daily' },
   ]
   return (
     <div className="flex rounded-md border border-slate-200 overflow-hidden text-xs font-medium shrink-0">
@@ -66,7 +66,7 @@ function CategoryRowItem({
   disabled: boolean
   deleteConfirm: boolean
   onTargetChange: (v: string) => void
-  onToggle: (v: 'fixed' | 'utility' | 'variable') => void
+  onToggle: (v: 'fixed' | 'variable_monthly' | 'variable_daily') => void
   onDeleteConfirm: () => void
   onDeleteCancel: () => void
   onDelete: () => void
@@ -129,7 +129,7 @@ export default function SettingsPage() {
   const [stats, setStats] = useState<{ expenses: number; income: number } | null>(null)
   const [testing, setTesting] = useState(false)
   const [newCatName, setNewCatName] = useState('')
-  const [newCatType, setNewCatType] = useState<'fixed' | 'utility' | 'variable'>('variable')
+  const [newCatType, setNewCatType] = useState<'fixed' | 'variable_monthly' | 'variable_daily'>('variable_daily')
   const [adding, setAdding] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
 
@@ -175,8 +175,8 @@ export default function SettingsPage() {
   useEffect(() => { init() }, [])
 
   const fixed = rows.filter((r) => r.category_type === 'fixed')
-  const utility = rows.filter((r) => r.category_type === 'utility')
-  const variable = rows.filter((r) => r.category_type === 'variable')
+  const variableMonthly = rows.filter((r) => r.category_type === 'variable_monthly')
+  const variableDaily = rows.filter((r) => r.category_type === 'variable_daily')
   const activeAccounts = accounts.filter((a) => a.is_active)
   const archivedAccounts = accounts.filter((a) => !a.is_active)
   const activeGoals = goals.filter((g) => !g.is_archived)
@@ -216,7 +216,7 @@ export default function SettingsPage() {
         targetData?.map((t) => ({
           category: t.category,
           monthly_target: t.monthly_target != null ? String(t.monthly_target) : '0',
-          category_type: (t.category_type as 'fixed' | 'utility' | 'variable') ?? 'variable',
+          category_type: (t.category_type as 'fixed' | 'variable_monthly' | 'variable_daily') ?? 'variable_daily',
         })) ?? []
       )
       setStats({ expenses: expCount ?? 0, income: incCount ?? 0 })
@@ -303,7 +303,7 @@ export default function SettingsPage() {
     setRows((prev) => prev.map((r) => (r.category === cat ? { ...r, monthly_target: v } : r)))
   }
 
-  function setCategoryType(cat: string, v: 'fixed' | 'utility' | 'variable') {
+  function setCategoryType(cat: string, v: 'fixed' | 'variable_monthly' | 'variable_daily') {
     setRows((prev) => prev.map((r) => (r.category === cat ? { ...r, category_type: v } : r)))
   }
 
@@ -548,7 +548,7 @@ export default function SettingsPage() {
               {fixed.length > 0 && (
                 <div className="p-5">
                   <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
-                    Fixed / Recurring
+                    Fixed Monthly
                   </h3>
                   {fixed.map((row) => (
                     <CategoryRowItem
@@ -566,12 +566,12 @@ export default function SettingsPage() {
                 </div>
               )}
 
-              {utility.length > 0 && (
+              {variableMonthly.length > 0 && (
                 <div className="p-5">
                   <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
-                    Utilities
+                    Variable Monthly
                   </h3>
-                  {utility.map((row) => (
+                  {variableMonthly.map((row) => (
                     <CategoryRowItem
                       key={row.category}
                       row={row}
@@ -587,12 +587,12 @@ export default function SettingsPage() {
                 </div>
               )}
 
-              {variable.length > 0 && (
+              {variableDaily.length > 0 && (
                 <div className="p-5">
                   <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
-                    Variable / Daily
+                    Variable Daily
                   </h3>
-                  {variable.map((row) => (
+                  {variableDaily.map((row) => (
                     <CategoryRowItem
                       key={row.category}
                       row={row}
@@ -633,7 +633,7 @@ export default function SettingsPage() {
                   </button>
                 </div>
                 <p className="text-xs text-slate-400 mt-2.5">
-                  Deleting a category will not affect existing expenses that use it. Toggle Fixed / Utility / Variable, then hit Save All to apply.
+                  Deleting a category will not affect existing expenses that use it. Toggle Fixed Monthly / Variable Monthly / Variable Daily, then hit Save All to apply.
                 </p>
               </div>
             </>

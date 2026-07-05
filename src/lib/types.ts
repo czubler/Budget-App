@@ -28,7 +28,7 @@ export type BudgetTarget = {
   category: string
   monthly_target: number | null
   is_recurring: boolean | null
-  category_type: 'fixed' | 'utility' | 'variable' | null
+  category_type: 'fixed' | 'variable_monthly' | 'variable_daily' | null
 }
 
 export type SavingsAccount = {

@@ -157,16 +157,163 @@ function BudgetCell({
   )
 }
 
-// ─── budget table section ─────────────────────────────────────────────────────
+// ─── budget table sections ────────────────────────────────────────────────────
 
-function BudgetTableSection({
-  title,
+function FixedMonthlySection({
   categories,
   targets,
   expensesByCategory,
   onSaveTarget,
 }: {
-  title: string
+  categories: string[]
+  targets: BudgetTarget[]
+  expensesByCategory: Record<string, number>
+  onSaveTarget: (category: string, value: number) => Promise<void>
+}) {
+  const rows = categories.map((cat) => {
+    const target = targets.find((t) => t.category === cat)
+    const setAmount = Number(target?.monthly_target ?? 0)
+    const actual = expensesByCategory[cat] ?? 0
+    const diff = actual - setAmount
+    return { cat, setAmount, actual, diff }
+  })
+  const sectionSet = rows.reduce((s, r) => s + r.setAmount, 0)
+  const sectionActual = rows.reduce((s, r) => s + r.actual, 0)
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Fixed Monthly</h3>
+        <span className="text-xs text-slate-400">{usd(sectionActual)} logged / {sectionSet > 0 ? usd(sectionSet) : 'no amounts set'}</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-200">
+              <th className="py-2 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Category</th>
+              <th className="py-2 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Set Amount</th>
+              <th className="py-2 px-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Actual Logged</th>
+              <th className="py-2 px-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Difference</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map(({ cat, setAmount, actual, diff }) => (
+              <tr key={cat} className="hover:bg-slate-50 transition-colors">
+                <td className="py-2.5 px-3 whitespace-nowrap"><CategoryBadge category={cat} /></td>
+                <td className="py-2.5 px-3">
+                  <BudgetCell category={cat} currentValue={setAmount} onSave={onSaveTarget} />
+                </td>
+                <td className="py-2.5 px-3 text-right whitespace-nowrap font-medium text-slate-700">
+                  {actual > 0 ? usd(actual) : <span className="text-slate-400">—</span>}
+                </td>
+                <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                  {setAmount > 0 ? (
+                    <span className={diff <= 0 ? 'text-emerald-600 font-medium' : 'text-red-500 font-medium'}>
+                      {diff > 0 ? `+${usd(diff)}` : diff < 0 ? `-${usd(Math.abs(diff))}` : usd(0)}
+                    </span>
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function VariableMonthlySection({
+  categories,
+  targets,
+  expensesByCategory,
+  onSaveTarget,
+}: {
+  categories: string[]
+  targets: BudgetTarget[]
+  expensesByCategory: Record<string, number>
+  onSaveTarget: (category: string, value: number) => Promise<void>
+}) {
+  const rows = categories.map((cat) => {
+    const target = targets.find((t) => t.category === cat)
+    const projected = Number(target?.monthly_target ?? 0)
+    const actual = expensesByCategory[cat] ?? 0
+    const diff = actual - projected
+    const pct = projected > 0 ? (actual / projected) * 100 : null
+    return { cat, projected, actual, diff, pct }
+  })
+  const sectionProjected = rows.reduce((s, r) => s + r.projected, 0)
+  const sectionActual = rows.reduce((s, r) => s + r.actual, 0)
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Variable Monthly</h3>
+        <span className="text-xs text-slate-400">{usd(sectionActual)} / {sectionProjected > 0 ? usd(sectionProjected) : 'no projections set'}</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-200">
+              <th className="py-2 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Category</th>
+              <th className="py-2 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Monthly Projection</th>
+              <th className="py-2 px-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Actual</th>
+              <th className="py-2 px-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Difference</th>
+              <th className="py-2 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider min-w-[130px]">% Used</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map(({ cat, projected, actual, diff, pct }) => (
+              <tr key={cat} className="hover:bg-slate-50 transition-colors">
+                <td className="py-2.5 px-3 whitespace-nowrap"><CategoryBadge category={cat} /></td>
+                <td className="py-2.5 px-3">
+                  <BudgetCell category={cat} currentValue={projected} onSave={onSaveTarget} />
+                </td>
+                <td className="py-2.5 px-3 text-right whitespace-nowrap font-medium text-slate-700">
+                  {actual > 0 ? usd(actual) : <span className="text-slate-400">—</span>}
+                </td>
+                <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                  {projected > 0 ? (
+                    <span className={diff <= 0 ? 'text-emerald-600 font-medium' : 'text-red-500 font-medium'}>
+                      {diff > 0 ? `+${usd(diff)}` : diff < 0 ? `-${usd(Math.abs(diff))}` : usd(0)}
+                    </span>
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
+                </td>
+                <td className="py-2.5 px-3">
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-300 ${progressColor(actual, projected)}`}
+                        style={{ width: projected > 0 ? `${Math.min((actual / projected) * 100, 100)}%` : '0%' }}
+                      />
+                    </div>
+                    <span className={`text-xs font-medium w-10 text-right shrink-0 ${
+                      pct === null ? 'text-slate-400' :
+                      pct >= 100 ? 'text-red-500' :
+                      pct >= 80 ? 'text-amber-500' : 'text-emerald-600'
+                    }`}>
+                      {pct !== null ? `${Math.round(pct)}%` : '—'}
+                    </span>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function VariableDailySection({
+  categories,
+  targets,
+  expensesByCategory,
+  onSaveTarget,
+}: {
   categories: string[]
   targets: BudgetTarget[]
   expensesByCategory: Record<string, number>
@@ -180,17 +327,14 @@ function BudgetTableSection({
     const pct = budget > 0 ? (actual / budget) * 100 : null
     return { cat, budget, actual, diff, pct }
   })
-
   const sectionBudget = rows.reduce((s, r) => s + r.budget, 0)
   const sectionActual = rows.reduce((s, r) => s + r.actual, 0)
 
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{title}</h3>
-        <span className="text-xs text-slate-400">
-          {usd(sectionActual)} / {sectionBudget > 0 ? usd(sectionBudget) : 'no targets set'}
-        </span>
+        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Variable Daily</h3>
+        <span className="text-xs text-slate-400">{usd(sectionActual)} / {sectionBudget > 0 ? usd(sectionBudget) : 'no targets set'}</span>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -379,13 +523,13 @@ export default function BudgetPage() {
   const [monthIncome, setMonthIncome] = useState(0)
   const [monthExpenses, setMonthExpenses] = useState(0)
   const [expensesByCategory, setExpensesByCategory] = useState<Record<string, number>>({})
-  const [fixedExpenses, setFixedExpenses] = useState(0)
-  const [utilityExpenses, setUtilityExpenses] = useState(0)
-  const [variableExpenses, setVariableExpenses] = useState(0)
+  const [fixedDeduction, setFixedDeduction] = useState(0)
+  const [varMonthlyDeduction, setVarMonthlyDeduction] = useState(0)
+  const [varDailyExpenses, setVarDailyExpenses] = useState(0)
   const [budgetTargets, setBudgetTargets] = useState<BudgetTarget[]>([])
   const [fixedCategories, setFixedCategories] = useState<string[]>([])
-  const [utilityCategories, setUtilityCategories] = useState<string[]>([])
-  const [variableCategories, setVariableCategories] = useState<string[]>([])
+  const [varMonthlyCategories, setVarMonthlyCategories] = useState<string[]>([])
+  const [varDailyCategories, setVarDailyCategories] = useState<string[]>([])
   const [trendData, setTrendData] = useState<MonthTrend[]>([])
   const [categoryData, setCategoryData] = useState<CategoryAmount[]>([])
   const [monthlySavings, setMonthlySavings] = useState(0)
@@ -443,14 +587,26 @@ export default function BudgetPage() {
     })
 
     const fixedCats = targets?.filter((t) => t.category_type === 'fixed').map((t) => t.category) ?? []
-    const utilityCats = targets?.filter((t) => t.category_type === 'utility').map((t) => t.category) ?? []
-    const varCats = targets?.filter((t) => t.category_type === 'variable' || (t.category_type == null && !t.is_recurring)).map((t) => t.category) ?? []
-    const fixedTotal = fixedCats.reduce((s, c) => s + (byCat[c] ?? 0), 0)
-    const utilityTotal = utilityCats.reduce((s, c) => s + (byCat[c] ?? 0), 0)
-    const variableTotal = varCats.reduce((s, c) => s + (byCat[c] ?? 0), 0)
+    const varMonthlyCats = targets?.filter((t) => t.category_type === 'variable_monthly').map((t) => t.category) ?? []
+    const varDailyCats = targets?.filter((t) => t.category_type === 'variable_daily' || (t.category_type == null && !t.is_recurring)).map((t) => t.category) ?? []
+
+    // Fixed: always deduct set monthly_target regardless of actual spend
+    const fixedDed = fixedCats.reduce((s, c) => {
+      const t = targets?.find((x) => x.category === c)
+      return s + Number(t?.monthly_target ?? 0)
+    }, 0)
+    // Variable Monthly: deduct max(projected, actual) per category
+    const varMonthlyDed = varMonthlyCats.reduce((s, c) => {
+      const t = targets?.find((x) => x.category === c)
+      const projected = Number(t?.monthly_target ?? 0)
+      const actual = byCat[c] ?? 0
+      return s + Math.max(projected, actual)
+    }, 0)
+    // Variable Daily: sum actual spend only
+    const varDailyExp = varDailyCats.reduce((s, c) => s + (byCat[c] ?? 0), 0)
 
     // Category chart data (all known categories, filter zeros in chart)
-    const catChartData = [...fixedCats, ...utilityCats, ...varCats]
+    const catChartData = [...fixedCats, ...varMonthlyCats, ...varDailyCats]
       .map((c) => ({ category: c, amount: byCat[c] ?? 0 }))
       .filter((d) => d.amount > 0)
 
@@ -472,13 +628,13 @@ export default function BudgetPage() {
     setMonthIncome(netIncome)
     setMonthExpenses(totalExp)
     setExpensesByCategory(byCat)
-    setFixedExpenses(fixedTotal)
-    setUtilityExpenses(utilityTotal)
-    setVariableExpenses(variableTotal)
+    setFixedDeduction(fixedDed)
+    setVarMonthlyDeduction(varMonthlyDed)
+    setVarDailyExpenses(varDailyExp)
     setBudgetTargets(targets ?? [])
     setFixedCategories(fixedCats)
-    setUtilityCategories(utilityCats)
-    setVariableCategories(varCats)
+    setVarMonthlyCategories(varMonthlyCats)
+    setVarDailyCategories(varDailyCats)
     setCategoryData(catChartData)
     setTrendData(trend)
     setMonthlySavings(savings)
@@ -487,7 +643,7 @@ export default function BudgetPage() {
   }
 
   async function handleSaveTarget(category: string, value: number) {
-    const categoryType = fixedCategories.includes(category) ? 'fixed' : utilityCategories.includes(category) ? 'utility' : 'variable'
+    const categoryType = fixedCategories.includes(category) ? 'fixed' : varMonthlyCategories.includes(category) ? 'variable_monthly' : 'variable_daily'
     const { error } = await supabase
       .from('budget_targets')
       .upsert(
@@ -505,7 +661,14 @@ export default function BudgetPage() {
 
   const net = monthIncome - monthExpenses
   const netPositive = net >= 0
-  const personalSpending = monthIncome - fixedExpenses - utilityExpenses - variableExpenses - monthlySavings
+  const fixedMonthlyTotal = budgetTargets
+    .filter((t) => t.category_type === 'fixed')
+    .reduce((s, t) => s + Number(t.monthly_target ?? 0), 0)
+  const varMonthlyProjected = budgetTargets
+    .filter((t) => t.category_type === 'variable_monthly')
+    .reduce((s, t) => s + Number(t.monthly_target ?? 0), 0)
+  const estimatedOverhead = fixedMonthlyTotal + varMonthlyProjected
+  const personalSpending = monthIncome - fixedDeduction - varMonthlyDeduction - varDailyExpenses - monthlySavings
 
   const now = new Date()
   const isPastMonth =
@@ -549,6 +712,25 @@ export default function BudgetPage() {
           />
         </div>
 
+        {/* Overhead card */}
+        <div className="bg-slate-50 border border-slate-200 rounded-xl px-5 py-4 mb-4">
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Estimated Monthly Overhead</p>
+          <div className="flex flex-wrap gap-x-8 gap-y-2">
+            <div>
+              <p className="text-xs text-slate-400 mb-0.5">Fixed monthly</p>
+              <p className="text-lg font-bold text-slate-700">{loading ? '—' : usd(fixedMonthlyTotal)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 mb-0.5">Variable monthly (projected)</p>
+              <p className="text-lg font-bold text-slate-700">{loading ? '—' : usd(varMonthlyProjected)}</p>
+            </div>
+            <div className="border-l border-slate-200 pl-8">
+              <p className="text-xs text-slate-400 mb-0.5">Combined overhead</p>
+              <p className="text-lg font-bold text-slate-800">{loading ? '—' : usd(estimatedOverhead)}</p>
+            </div>
+          </div>
+        </div>
+
         {/* Formula bar */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-3.5">
           <p className="text-xs text-slate-400 mb-2 font-medium uppercase tracking-wider">Monthly spending breakdown</p>
@@ -558,18 +740,18 @@ export default function BudgetPage() {
 
             <span className="text-slate-300 mx-1">−</span>
 
-            <span className="font-semibold text-slate-700">{usd(fixedExpenses)}</span>
+            <span className="font-semibold text-slate-700">{usd(fixedDeduction)}</span>
             <span className="text-slate-400">fixed</span>
 
             <span className="text-slate-300 mx-1">−</span>
 
-            <span className="font-semibold text-slate-700">{usd(utilityExpenses)}</span>
-            <span className="text-slate-400">utilities</span>
+            <span className="font-semibold text-slate-700">{usd(varMonthlyDeduction)}</span>
+            <span className="text-slate-400">var. monthly</span>
 
             <span className="text-slate-300 mx-1">−</span>
 
-            <span className="font-semibold text-slate-700">{usd(variableExpenses)}</span>
-            <span className="text-slate-400">variable</span>
+            <span className="font-semibold text-slate-700">{usd(varDailyExpenses)}</span>
+            <span className="text-slate-400">var. daily</span>
 
             <span className="text-slate-300 mx-1">−</span>
 
@@ -652,33 +834,34 @@ export default function BudgetPage() {
             </div>
           ) : (
             <>
-              <BudgetTableSection
-                title="Fixed / Recurring"
-                categories={fixedCategories}
-                targets={budgetTargets}
-                expensesByCategory={expensesByCategory}
-                onSaveTarget={handleSaveTarget}
-              />
-              {utilityCategories.length > 0 && (
-                <div className="border-t border-slate-100 pt-6">
-                  <BudgetTableSection
-                    title="Utilities"
-                    categories={utilityCategories}
+              {fixedCategories.length > 0 && (
+                <FixedMonthlySection
+                  categories={fixedCategories}
+                  targets={budgetTargets}
+                  expensesByCategory={expensesByCategory}
+                  onSaveTarget={handleSaveTarget}
+                />
+              )}
+              {varMonthlyCategories.length > 0 && (
+                <div className={fixedCategories.length > 0 ? 'border-t border-slate-100 pt-6' : ''}>
+                  <VariableMonthlySection
+                    categories={varMonthlyCategories}
                     targets={budgetTargets}
                     expensesByCategory={expensesByCategory}
                     onSaveTarget={handleSaveTarget}
                   />
                 </div>
               )}
-              <div className="border-t border-slate-100 pt-6">
-                <BudgetTableSection
-                  title="Variable / Daily"
-                  categories={variableCategories}
-                  targets={budgetTargets}
-                  expensesByCategory={expensesByCategory}
-                  onSaveTarget={handleSaveTarget}
-                />
-              </div>
+              {varDailyCategories.length > 0 && (
+                <div className={(fixedCategories.length > 0 || varMonthlyCategories.length > 0) ? 'border-t border-slate-100 pt-6' : ''}>
+                  <VariableDailySection
+                    categories={varDailyCategories}
+                    targets={budgetTargets}
+                    expensesByCategory={expensesByCategory}
+                    onSaveTarget={handleSaveTarget}
+                  />
+                </div>
+              )}
             </>
           )}
         </div>
