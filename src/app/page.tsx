@@ -1,6 +1,8 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
+import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
 import type { Expense } from '@/lib/types'
@@ -9,8 +11,9 @@ import { usePaymentMethods } from '@/lib/usePaymentMethods'
 import { CategoryPicker } from '@/components/CategoryPicker'
 import { toDateStr, nextOccurrenceAfter } from '@/lib/recurringUtils'
 
-const STATIC_PAYMENT_METHODS = ['Cash', 'Credit Card', 'Debit Card', 'Venmo', 'Zelle', 'Check', 'Other']
+// ─── helpers ──────────────────────────────────────────────────────────────────
 
+const STATIC_PAYMENT_METHODS = ['Cash', 'Credit Card', 'Debit Card', 'Venmo', 'Zelle', 'Check', 'Other']
 const DAYS_SHORT = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
@@ -21,20 +24,8 @@ function todayString() {
 
 function formatDate(dateStr: string) {
   const [y, m, d] = dateStr.split('-').map(Number)
-  return new Date(y, m - 1, d).toLocaleDateString('en-US', {
-    month: 'short', day: 'numeric', year: 'numeric',
-  })
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
-
-const defaultForm = (paymentMethod = '') => ({
-  description: '',
-  merchant: '',
-  amount: '',
-  date: todayString(),
-  payment_method: paymentMethod,
-  category: '',
-  notes: '',
-})
 
 const inputCls =
   'w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white'
@@ -69,8 +60,20 @@ function SegmentButton({
   )
 }
 
-export default function AddExpensePage() {
-  const [form, setForm] = useState(defaultForm())
+// ─── Add Expense Form ─────────────────────────────────────────────────────────
+
+const defaultExpenseForm = (paymentMethod = '') => ({
+  description: '',
+  merchant: '',
+  amount: '',
+  date: todayString(),
+  payment_method: paymentMethod,
+  category: '',
+  notes: '',
+})
+
+function AddExpenseForm() {
+  const [form, setForm] = useState(defaultExpenseForm())
   const [submitting, setSubmitting] = useState(false)
   const [recentExpenses, setRecentExpenses] = useState<Expense[]>([])
   const [recentLoading, setRecentLoading] = useState(true)
@@ -78,7 +81,6 @@ export default function AddExpensePage() {
   const { names: categories } = useCategories()
   const { methods: dbPaymentMethods } = usePaymentMethods()
 
-  // recurring state — defaults to today's day/month so the picker feels pre-filled
   const [isRecurring, setIsRecurring] = useState(false)
   const [recurringType, setRecurringType] = useState<RecurringType>('subscription')
   const [recurringFrequency, setRecurringFrequency] = useState<RecurringFrequency>('monthly')
@@ -88,7 +90,6 @@ export default function AddExpensePage() {
 
   useEffect(() => {
     fetchRecent()
-    // Auto-generate any overdue recurring expenses on page load
     fetch('/api/process-recurring', { method: 'POST' })
       .then((r) => r.json())
       .then(({ count }) => {
@@ -100,7 +101,6 @@ export default function AddExpensePage() {
       .catch(() => {})
   }, [])
 
-  // "/" key focuses the description field from anywhere on the page
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (
@@ -127,7 +127,7 @@ export default function AddExpensePage() {
         .limit(5)
       if (data) setRecentExpenses(data)
     } catch {
-      // silently fail — recent list is non-critical
+      // non-critical
     } finally {
       setRecentLoading(false)
     }
@@ -192,15 +192,13 @@ export default function AddExpensePage() {
     }
 
     setSubmitting(false)
-    setForm(defaultForm(lastPaymentMethod))
+    setForm(defaultExpenseForm(lastPaymentMethod))
     fetchRecent()
     setTimeout(() => descriptionRef.current?.focus(), 50)
   }
 
   return (
     <div>
-      <h1 className="text-xl font-bold text-slate-800 mb-5">Quick Add Expense</h1>
-
       <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
 
         <div>
@@ -294,8 +292,7 @@ export default function AddExpensePage() {
 
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">
-            Notes{' '}
-            <span className="text-xs font-normal text-slate-400">(optional)</span>
+            Notes <span className="text-xs font-normal text-slate-400">(optional)</span>
           </label>
           <textarea
             value={form.notes}
@@ -306,7 +303,6 @@ export default function AddExpensePage() {
           />
         </div>
 
-        {/* ── Recurring toggle ────────────────────────────────────────────── */}
         <div className="pt-1 border-t border-slate-100">
           <label className="flex items-center gap-2.5 cursor-pointer select-none w-fit">
             <input
@@ -321,8 +317,6 @@ export default function AddExpensePage() {
 
         {isRecurring && (
           <div className="rounded-lg border border-indigo-100 bg-indigo-50/60 p-4 space-y-3.5">
-
-            {/* Type */}
             <div className="flex items-center gap-3 flex-wrap">
               <span className="text-xs font-medium text-slate-500 w-16 shrink-0">Type</span>
               <SegmentButton
@@ -335,7 +329,6 @@ export default function AddExpensePage() {
               />
             </div>
 
-            {/* Frequency */}
             <div className="flex items-center gap-3 flex-wrap">
               <span className="text-xs font-medium text-slate-500 w-16 shrink-0">Repeats</span>
               <SegmentButton
@@ -350,7 +343,6 @@ export default function AddExpensePage() {
               />
             </div>
 
-            {/* Day of month */}
             {recurringFrequency === 'monthly' && (
               <div className="flex items-center gap-3">
                 <span className="text-xs font-medium text-slate-500 w-16 shrink-0">Day</span>
@@ -371,7 +363,6 @@ export default function AddExpensePage() {
               </div>
             )}
 
-            {/* Day of week (weekly / biweekly) */}
             {(recurringFrequency === 'weekly' || recurringFrequency === 'biweekly') && (
               <div className="flex items-center gap-3 flex-wrap">
                 <span className="text-xs font-medium text-slate-500 w-16 shrink-0">Day</span>
@@ -394,7 +385,6 @@ export default function AddExpensePage() {
               </div>
             )}
 
-            {/* Month + day (yearly) */}
             {recurringFrequency === 'yearly' && (
               <div className="flex items-center gap-3 flex-wrap">
                 <span className="text-xs font-medium text-slate-500 w-16 shrink-0">Date</span>
@@ -486,5 +476,336 @@ export default function AddExpensePage() {
         </div>
       </div>
     </div>
+  )
+}
+
+// ─── Add Income Form (condensed) ──────────────────────────────────────────────
+
+function AddIncomeForm() {
+  const [form, setForm] = useState({
+    source: '',
+    paycheck_date: todayString(),
+    gross_amount: '',
+    taxes_withheld: '',
+    net_amount: '',
+    notes: '',
+  })
+  const [submitting, setSubmitting] = useState(false)
+  const sourceRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { sourceRef.current?.focus() }, [])
+
+  function handleAmountChange(field: 'gross_amount' | 'taxes_withheld', value: string) {
+    const next = { ...form, [field]: value }
+    const gross = parseFloat(next.gross_amount) || 0
+    const taxes = parseFloat(next.taxes_withheld) || 0
+    setForm({ ...next, net_amount: gross > 0 ? (gross - taxes).toFixed(2) : '' })
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    const net = parseFloat(form.net_amount)
+    if (!net || net <= 0) { toast.error('Enter a net amount'); return }
+    setSubmitting(true)
+    const { error } = await supabase.from('income').insert({
+      source: form.source || null,
+      paycheck_date: form.paycheck_date,
+      gross_amount: parseFloat(form.gross_amount) || null,
+      taxes_withheld: parseFloat(form.taxes_withheld) || null,
+      net_amount: net,
+      notes: form.notes || null,
+    })
+    setSubmitting(false)
+    if (error) { toast.error('Failed to save'); return }
+    toast.success('Income logged!')
+    setForm({ source: '', paycheck_date: todayString(), gross_amount: '', taxes_withheld: '', net_amount: '', notes: '' })
+    sourceRef.current?.focus()
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Source</label>
+          <input
+            ref={sourceRef}
+            type="text"
+            value={form.source}
+            onChange={(e) => setForm({ ...form, source: e.target.value })}
+            placeholder="e.g. Employer name"
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">
+            Date <span className="text-red-400">*</span>
+          </label>
+          <input
+            required
+            type="date"
+            value={form.paycheck_date}
+            onChange={(e) => setForm({ ...form, paycheck_date: e.target.value })}
+            className={inputCls}
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Gross</label>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm select-none">$</span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.gross_amount}
+              onChange={(e) => handleAmountChange('gross_amount', e.target.value)}
+              placeholder="0.00"
+              className={`${inputCls} pl-7`}
+            />
+          </div>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Taxes</label>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm select-none">$</span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.taxes_withheld}
+              onChange={(e) => handleAmountChange('taxes_withheld', e.target.value)}
+              placeholder="0.00"
+              className={`${inputCls} pl-7`}
+            />
+          </div>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">
+            Net <span className="text-red-400">*</span>
+          </label>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm select-none">$</span>
+            <input
+              required
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.net_amount}
+              onChange={(e) => setForm({ ...form, net_amount: e.target.value })}
+              placeholder="0.00"
+              className={`${inputCls} pl-7`}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1">
+          Notes <span className="text-xs font-normal text-slate-400">(optional)</span>
+        </label>
+        <textarea
+          value={form.notes}
+          onChange={(e) => setForm({ ...form, notes: e.target.value })}
+          placeholder="Any extra details..."
+          rows={2}
+          className={`${inputCls} resize-none`}
+        />
+      </div>
+
+      <p className="text-xs text-slate-400">
+        For overtime tier breakdowns, use the full{' '}
+        <Link href="/income" className="underline hover:text-slate-600">Paychecks</Link> page.
+      </p>
+
+      <button
+        type="submit"
+        disabled={submitting}
+        className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-semibold rounded-lg transition-colors text-base shadow-sm cursor-pointer disabled:cursor-not-allowed"
+      >
+        {submitting ? 'Saving…' : '+ Log Income'}
+      </button>
+    </form>
+  )
+}
+
+// ─── Add Savings Form (condensed) ─────────────────────────────────────────────
+
+function AddSavingsForm() {
+  const [targetType, setTargetType] = useState<'account' | 'goal'>('account')
+  const [accounts, setAccounts] = useState<{ id: string; name: string }[]>([])
+  const [goals, setGoals] = useState<{ id: string; name: string }[]>([])
+  const [selectedId, setSelectedId] = useState('')
+  const [amount, setAmount] = useState('')
+  const [date, setDate] = useState(todayString())
+  const [notes, setNotes] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const amtRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    async function load() {
+      const [{ data: accts }, { data: gls }] = await Promise.all([
+        supabase.from('savings_accounts').select('id, name').eq('is_active', true).order('name'),
+        supabase.from('savings_goals').select('id, name').eq('is_archived', false).order('name'),
+      ])
+      if (accts) setAccounts(accts)
+      if (gls) setGoals(gls)
+    }
+    load()
+    amtRef.current?.focus()
+  }, [])
+
+  useEffect(() => { setSelectedId('') }, [targetType])
+
+  const options = targetType === 'account' ? accounts : goals
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    const amt = parseFloat(amount)
+    if (!amt || amt <= 0) { toast.error('Enter a valid amount'); return }
+    if (!selectedId) { toast.error(`Select a${targetType === 'account' ? 'n account' : ' goal'}`); return }
+    setSubmitting(true)
+
+    const table = targetType === 'account' ? 'savings_contributions' : 'savings_goal_contributions'
+    const fkKey = targetType === 'account' ? 'account_id' : 'goal_id'
+
+    const { error } = await supabase.from(table).insert({
+      [fkKey]: selectedId,
+      amount: amt,
+      date,
+      notes: notes.trim() || null,
+    })
+
+    setSubmitting(false)
+    if (error) { toast.error('Failed to save'); return }
+    const targetName = options.find((o) => o.id === selectedId)?.name ?? ''
+    toast.success(`Contribution added${targetName ? ` to ${targetName}` : ''}`)
+    setAmount('')
+    setNotes('')
+    setTimeout(() => amtRef.current?.focus(), 50)
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-2">Contribute to</label>
+        <div className="flex rounded-md border border-slate-200 overflow-hidden text-sm font-medium bg-white w-fit">
+          {(['account', 'goal'] as const).map((t, i) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTargetType(t)}
+              className={`px-4 py-2 transition-colors ${
+                targetType === t ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:bg-slate-50'
+              } ${i > 0 ? 'border-l border-slate-200' : ''}`}
+            >
+              {t === 'account' ? 'Account' : 'Goal'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1">
+          {targetType === 'account' ? 'Account' : 'Goal'} <span className="text-red-400">*</span>
+        </label>
+        <select
+          required
+          value={selectedId}
+          onChange={(e) => setSelectedId(e.target.value)}
+          className={inputCls}
+        >
+          <option value="">Select {targetType === 'account' ? 'an account' : 'a goal'}…</option>
+          {options.map((o) => (
+            <option key={o.id} value={o.id}>{o.name}</option>
+          ))}
+        </select>
+        {options.length === 0 && (
+          <p className="text-xs text-slate-400 mt-1">
+            No {targetType}s yet.{' '}
+            <Link href="/settings" className="underline hover:text-slate-600">Add one in Settings.</Link>
+          </p>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">
+            Amount <span className="text-red-400">*</span>
+          </label>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm select-none">$</span>
+            <input
+              ref={amtRef}
+              required
+              type="number"
+              min="0"
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0.00"
+              className={`${inputCls} pl-7`}
+            />
+          </div>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">
+            Date <span className="text-red-400">*</span>
+          </label>
+          <input
+            required
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className={inputCls}
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1">
+          Notes <span className="text-xs font-normal text-slate-400">(optional)</span>
+        </label>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Any extra details..."
+          rows={2}
+          className={`${inputCls} resize-none`}
+        />
+      </div>
+
+      <button
+        type="submit"
+        disabled={submitting}
+        className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-semibold rounded-lg transition-colors text-base shadow-sm cursor-pointer disabled:cursor-not-allowed"
+      >
+        {submitting ? 'Saving…' : '+ Log Contribution'}
+      </button>
+    </form>
+  )
+}
+
+// ─── Page shell ───────────────────────────────────────────────────────────────
+
+function AddPageContent() {
+  const searchParams = useSearchParams()
+  const tab = searchParams.get('tab') ?? 'expense'
+
+  return (
+    <div>
+      {tab === 'expense' && <AddExpenseForm />}
+      {tab === 'income' && <AddIncomeForm />}
+      {tab === 'savings' && <AddSavingsForm />}
+    </div>
+  )
+}
+
+export default function AddPage() {
+  return (
+    <Suspense>
+      <AddPageContent />
+    </Suspense>
   )
 }
